@@ -1,0 +1,133 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActiveUser() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        getUserData().active == true &&
+        getUserData().loginEnabled == true;
+    }
+
+    function isSuperCoordinator() {
+      return isActiveUser() && getUserData().role == 'super_coordinator';
+    }
+
+    function isClassCoordinator() {
+      return isActiveUser() && getUserData().role == 'class_coordinator';
+    }
+
+    function isViewCoordinator() {
+      return isActiveUser() && getUserData().role == 'view_coordinator';
+    }
+
+    function isEventActive(eventId) {
+      return exists(/databases/$(database)/documents/events/$(eventId)) &&
+        get(/databases/$(database)/documents/events/$(eventId)).data.status == 'active';
+    }
+
+    // 1. Users collection: Any authenticated user can read their own profile; Super/Class/View coordinators can read user list
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isSuperCoordinator() || isClassCoordinator() || isViewCoordinator());
+      allow create, update, delete: if isSuperCoordinator();
+    }
+
+    // 2. Events collection
+    match /events/{eventId} {
+      allow read: if isActiveUser();
+      allow create, update, delete: if isSuperCoordinator();
+    }
+
+    // 3. Classes collection
+    match /classes/{classId} {
+      allow read: if isActiveUser();
+      allow create, update, delete: if isSuperCoordinator();
+    }
+
+    // 4. Students collection
+    match /students/{studentId} {
+      allow read: if isActiveUser();
+      allow create, update, delete: if isSuperCoordinator();
+    }
+
+    // 5. Event Participants
+    match /eventParticipants/{participantId} {
+      allow read: if isActiveUser();
+      allow create, update: if isSuperCoordinator() || (isActiveUser() && isEventActive(request.resource.data.eventId));
+      allow delete: if isSuperCoordinator();
+    }
+
+    // 6. Payments
+    match /payments/{paymentId} {
+      allow read: if isActiveUser();
+      // Class coordinator or authorized collection assistant can submit pending payment with their own addedBy
+      allow create: if isSuperCoordinator() || (
+        isActiveUser() &&
+        isEventActive(request.resource.data.eventId) &&
+        request.resource.data.addedBy == request.auth.uid &&
+        request.resource.data.status == 'pending_approval'
+      );
+      // Approvals, rollbacks, and edits to payment status can strictly only be performed by Super Coordinator or authorized assistant (self-approval strictly prohibited)
+      allow update: if isSuperCoordinator() || (
+        isActiveUser() &&
+        resource.data.addedBy != request.auth.uid &&
+        request.resource.data.status in ['approved', 'declined'] &&
+        isEventActive(resource.data.eventId)
+      ) || (
+        isActiveUser() &&
+        resource.data.addedBy == request.auth.uid &&
+        resource.data.status == 'pending_approval' &&
+        request.resource.data.status == 'pending_approval' &&
+        isEventActive(resource.data.eventId)
+      );
+      allow delete: if isSuperCoordinator();
+    }
+
+    // 7. Central Receipts
+    match /centralReceipts/{receiptId} {
+      allow read: if isActiveUser();
+      allow write: if isSuperCoordinator();
+    }
+
+    // 8. Expenses
+    match /expenses/{expenseId} {
+      allow read: if isActiveUser();
+      allow write: if isSuperCoordinator();
+    }
+
+    // 9. Adjustments
+    match /adjustments/{adjustmentId} {
+      allow read: if isActiveUser();
+      allow write: if isSuperCoordinator();
+    }
+
+    // 10. Daily Closings
+    match /dailyClosings/{closingId} {
+      allow read: if isActiveUser();
+      allow write: if isSuperCoordinator();
+    }
+
+    // 11. Audit Logs (Append-only by active users, immutable and never deletable)
+    match /auditLogs/{logId} {
+      allow read: if isSuperCoordinator();
+      allow create: if isActiveUser() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // 12. Coordinator Assignments
+    match /coordinatorAssignments/{assignmentId} {
+      allow read: if isActiveUser();
+      allow write: if isSuperCoordinator();
+    }
+  }
+}

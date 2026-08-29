@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="primary-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#0D9488" />
+    </linearGradient>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <linearGradient id="gold-accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34D399" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+  </defs>
+  <!-- Rounded Base -->
+  <rect width="64" height="64" rx="16" fill="url(#bg-grad)" stroke="#1E293B" stroke-width="2"/>
+  
+  <!-- Outer Geometric Diamond / Shield -->
+  <path d="M32 10L52 22V42L32 54L12 42V22L32 10Z" fill="url(#primary-grad)" fill-opacity="0.15" stroke="url(#primary-grad)" stroke-width="2.5" stroke-linejoin="round"/>
+  
+  <!-- Central Ledger / Rupee Pillar Accent -->
+  <path d="M22 24H42" stroke="#F8FAFC" stroke-width="3" stroke-linecap="round"/>
+  <path d="M22 31H38" stroke="#34D399" stroke-width="3" stroke-linecap="round"/>
+  <path d="M28 24C34 24 38 27 38 31C38 35 34 38 28 38H24V46" stroke="#F8FAFC" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M27 38L37 46" stroke="#34D399" stroke-width="3" stroke-linecap="round"/>
+</svg>
