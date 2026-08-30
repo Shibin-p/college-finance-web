@@ -33,10 +33,15 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to="/login" replace />;
   }
 
-  if (requireCrossClassAssistant && !isCrossClassAssistant && userProfile.role !== "super_coordinator") {
+  // Cross-Class Assistant capability route guard
+  if (requireCrossClassAssistant) {
+    if (isCrossClassAssistant || userProfile.role === "super_coordinator") {
+      return <Outlet />;
+    }
     return <Navigate to="/" replace />;
   }
 
+  // Primary Role route guard
   if (allowedRoles && !allowedRoles.includes(userProfile.role)) {
     if (userProfile.role === "super_coordinator") {
       return <Navigate to="/super/dashboard" replace />;

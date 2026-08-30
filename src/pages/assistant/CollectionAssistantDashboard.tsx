@@ -33,6 +33,7 @@ import {
   Check,
   X,
   CheckSquare,
+  Lock,
 } from "lucide-react";
 
 export const CollectionAssistantDashboard: React.FC = () => {
@@ -46,13 +47,14 @@ export const CollectionAssistantDashboard: React.FC = () => {
   const [participants, setParticipants] = useState<EventParticipantModel[]>([]);
   const [payments, setPayments] = useState<PaymentModel[]>([]);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<"pending" | "collect" | "approvals">("pending");
+  const [tab, setTab] = useState<"pending" | "approvals">("pending");
   const [searchTerm, setSearchTerm] = useState("");
 
   // Payment Modal
   const [paymentTarget, setPaymentTarget] = useState<{
     student: StudentModel;
     participant: EventParticipantModel;
+    remainingAmount: number;
   } | null>(null);
   const [amount, setAmount] = useState("500");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
@@ -66,14 +68,16 @@ export const CollectionAssistantDashboard: React.FC = () => {
   const [declineTarget, setDeclineTarget] = useState<PaymentModel | null>(null);
   const [declineReason, setDeclineReason] = useState("");
 
-  // Filter authorized classes
+  // Filter authorized classes strictly
   const authorizedClasses = classes.filter((c) =>
     crossClassAuthorizedClassIds.includes(c.id)
   );
 
   useEffect(() => {
-    if (authorizedClasses.length > 0 && !selectedClassId) {
-      setSelectedClassId(authorizedClasses[0].id);
+    if (authorizedClasses.length > 0) {
+      if (!selectedClassId || !authorizedClasses.some((c) => c.id === selectedClassId)) {
+        setSelectedClassId(authorizedClasses[0].id);
+      }
     }
   }, [crossClassAuthorizedClassIds, classes]);
 
@@ -106,6 +110,9 @@ export const CollectionAssistantDashboard: React.FC = () => {
     loadData();
   }, [activeEvent?.id, selectedClassId]);
 
+  const canRecordAnyPayment =
+    crossClassCapabilities.canAddPayment || crossClassCapabilities.canAddInstallment;
+
   const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!paymentTarget || !activeEvent || !userProfile) return;
@@ -115,6 +122,23 @@ export const CollectionAssistantDashboard: React.FC = () => {
     if (isNaN(numAmount) || numAmount <= 0) {
       setFeedback({ type: "error", msg: "Please enter a valid positive payment amount." });
       return;
+    }
+
+    // Enforce full vs installment capability
+    if (!crossClassCapabilities.canAddInstallment && crossClassCapabilities.canAddPayment) {
+      if (numAmount < paymentTarget.remainingAmount) {
+        setFeedback({
+          type: "error",
+          msg: `Installment payments are not permitted for your account. Full contribution of ₹${paymentTarget.remainingAmount} required.`,
+        });
+        return;
+      }
+    }
+
+    if (!crossClassCapabilities.canAddPayment && crossClassCapabilities.canAddInstallment) {
+      if (numAmount >= paymentTarget.remainingAmount && paymentTarget.remainingAmount > 0) {
+        // Logging is allowed as installment step
+      }
     }
 
     setSubmitting(true);
@@ -135,7 +159,7 @@ export const CollectionAssistantDashboard: React.FC = () => {
 
       setFeedback({
         type: "success",
-        msg: `Logged ₹${numAmount} for ${paymentTarget.student.name}. Submitted for approval.`,
+        msg: `Logged ₹${numAmount} for ${paymentTarget.student.name}. Submitted for Super Coordinator verification.`,
       });
       await loadData();
       setPaymentTarget(null);
@@ -159,7 +183,7 @@ export const CollectionAssistantDashboard: React.FC = () => {
     }
 
     try {
-      await approvePayment(pay.id, userProfile);
+      await approvePayment(pay.id, userProfile, "Cross-Class Collection Assistant");
       await loadData();
       setFeedback({ type: "success", msg: `Payment of ₹${pay.amount} approved.` });
     } catch (err: any) {
@@ -170,11 +194,11 @@ export const CollectionAssistantDashboard: React.FC = () => {
   const handleDecline = async () => {
     if (!declineTarget || !userProfile) return;
     try {
-      await declinePayment(declineTarget.id, declineReason, userProfile);
+      await declinePayment(declineTarget.id, declineReason, userProfile, "Cross-Class Collection Assistant");
       await loadData();
       setDeclineTarget(null);
       setDeclineReason("");
-      setFeedback({ type: "success", msg: "Payment declined." });
+      setFeedback({ type: "success", msg: "Payment submission declined." });
     } catch (err: any) {
       setFeedback({ type: "error", msg: err.message || "Failed to decline." });
     }
@@ -200,7 +224,7 @@ export const CollectionAssistantDashboard: React.FC = () => {
         <EmptyState
           icon={Layers}
           title="No Classes Authorized"
-          description="You have Cross-Class Collection Assistant access, but no classes have been authorized by the Super Coordinator yet."
+          description="You have Cross-Class Collection Assistant access, but no classes have been authorized by the Super Coordinator yet for this active event."
         />
       </div>
     );
@@ -218,19 +242,19 @@ export const CollectionAssistantDashboard: React.FC = () => {
                 <span>Collection Assistant Workspace</span>
               </span>
               <span className="text-xs text-slate-400 font-mono">
-                {authorizedClasses.length} Authorized Classes
+                {authorizedClasses.length} Authorized Classes • {activeEvent?.name}
               </span>
             </div>
             <h1 className="text-2xl font-extrabold text-white tracking-tight">
               Cross-Class Collection Portal
             </h1>
             <p className="text-xs text-slate-400 mt-1">
-              Assist in field collection and track pending student balances across authorized classes.
+              Assist in student balance tracking, field collection, and pending approvals across your authorized classes.
             </p>
           </div>
 
           <div className="flex items-center gap-2">
-            <label className="text-xs font-bold text-slate-400 uppercase">Class:</label>
+            <label className="text-xs font-bold text-slate-300 uppercase">Class Scope:</label>
             <select
               value={selectedClassId}
               onChange={(e) => setSelectedClassId(e.target.value)}
@@ -303,7 +327,7 @@ export const CollectionAssistantDashboard: React.FC = () => {
           }`}
         >
           <PhoneCall className="w-3.5 h-3.5" />
-          <span>Pending Students ({pendingStudentList.length})</span>
+          <span>Pending Student Call List ({pendingStudentList.length})</span>
         </button>
 
         {crossClassCapabilities.canHandlePendingApprovals && (
@@ -325,101 +349,121 @@ export const CollectionAssistantDashboard: React.FC = () => {
       {/* TAB 1: Pending Students Roster */}
       {tab === "pending" && (
         <div className="glass-panel rounded-3xl border border-slate-800 overflow-hidden space-y-4">
-          <div className="p-4 border-b border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                {selectedClassObj?.displayName} Pending Call List
+          {!crossClassCapabilities.canViewCollection ? (
+            <div className="p-8 text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center mx-auto">
+                <Lock className="w-6 h-6" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-200">
+                Collection & Pending Lists Restricted
               </h3>
-              <p className="text-[11px] text-slate-400">
-                Identify students with remaining contributions and record collections
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                The Super Coordinator has not enabled View Collection capability for your assistant access on this event.
               </p>
             </div>
-
-            <div className="relative w-full sm:w-64">
-              <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5 pointer-events-none" />
-              <input
-                type="text"
-                placeholder="Search student or reg..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-teal-500 font-mono"
-              />
-            </div>
-          </div>
-
-          {pendingStudentList.length === 0 && !loading ? (
-            <div className="p-8">
-              <EmptyState
-                icon={CheckCircle2}
-                title="All Students Settled"
-                description={`All students in ${selectedClassObj?.displayName || "this class"} have fully paid their required target.`}
-              />
-            </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-900/80 text-slate-400 font-semibold border-b border-slate-800">
-                  <tr>
-                    <th className="py-3 px-4">Register No</th>
-                    <th className="py-3 px-4">Student Name</th>
-                    <th className="py-3 px-4 font-mono">Target</th>
-                    <th className="py-3 px-4 font-mono">Paid</th>
-                    <th className="py-3 px-4 font-mono">Due Balance</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {pendingStudentList
-                    .filter(
-                      (item) =>
-                        !searchTerm ||
-                        item.student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        item.student.registerNumber.toLowerCase().includes(searchTerm.toLowerCase())
-                    )
-                    .map(({ student, participant, fin }) => (
-                      <tr key={student.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="py-3 px-4 font-mono font-bold text-slate-200">
-                          {student.registerNumber}
-                        </td>
-                        <td className="py-3 px-4 font-semibold text-slate-100">{student.name}</td>
-                        <td className="py-3 px-4 font-mono text-slate-300">
-                          {formatINR(fin.requiredAmount)}
-                        </td>
-                        <td className="py-3 px-4 font-mono font-bold text-emerald-400">
-                          {formatINR(fin.approvedPaid)}
-                        </td>
-                        <td className="py-3 px-4 font-mono font-extrabold text-amber-400">
-                          {formatINR(fin.remainingAmount)}
-                        </td>
-                        <td className="py-3 px-4">
-                          <StatusBadge
-                            status={fin.isPartiallyPaid ? "partially_paid" : "not_paid"}
-                            size="sm"
-                          />
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          {crossClassCapabilities.canAddPayment && participant && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPaymentTarget({ student, participant });
-                                setAmount(
-                                  fin.remainingAmount > 0 ? String(fin.remainingAmount) : "500"
-                                );
-                              }}
-                              className="px-2.5 py-1 bg-teal-600 hover:bg-teal-500 text-white font-bold rounded-lg transition-all flex items-center gap-1 ml-auto cursor-pointer"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                              <span>Collect</span>
-                            </button>
-                          )}
-                        </td>
+            <>
+              <div className="p-4 border-b border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                    {selectedClassObj?.displayName} Pending Call & Follow-up List
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Contact students with remaining dues and log field collections
+                  </p>
+                </div>
+
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5 pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Search student or reg..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-9 pr-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-teal-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              {pendingStudentList.length === 0 && !loading ? (
+                <div className="p-8">
+                  <EmptyState
+                    icon={CheckCircle2}
+                    title="All Students Settled"
+                    description={`All students in ${selectedClassObj?.displayName || "this class"} have settled their required target.`}
+                  />
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-900/80 text-slate-400 font-semibold border-b border-slate-800">
+                      <tr>
+                        <th className="py-3 px-4">Register No</th>
+                        <th className="py-3 px-4">Student Name</th>
+                        <th className="py-3 px-4 font-mono">Target</th>
+                        <th className="py-3 px-4 font-mono">Paid</th>
+                        <th className="py-3 px-4 font-mono">Due Balance</th>
+                        <th className="py-3 px-4">Status</th>
+                        <th className="py-3 px-4 text-right">Action</th>
                       </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {pendingStudentList
+                        .filter(
+                          (item) =>
+                            !searchTerm ||
+                            item.student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                            item.student.registerNumber.toLowerCase().includes(searchTerm.toLowerCase())
+                        )
+                        .map(({ student, participant, fin }) => (
+                          <tr key={student.id} className="hover:bg-slate-800/30 transition-colors">
+                            <td className="py-3 px-4 font-mono font-bold text-slate-200">
+                              {student.registerNumber}
+                            </td>
+                            <td className="py-3 px-4 font-semibold text-slate-100">{student.name}</td>
+                            <td className="py-3 px-4 font-mono text-slate-300">
+                              {formatINR(fin.requiredAmount)}
+                            </td>
+                            <td className="py-3 px-4 font-mono font-bold text-emerald-400">
+                              {formatINR(fin.approvedPaid)}
+                            </td>
+                            <td className="py-3 px-4 font-mono font-extrabold text-amber-400">
+                              {formatINR(fin.remainingAmount)}
+                            </td>
+                            <td className="py-3 px-4">
+                              <StatusBadge
+                                status={fin.isPartiallyPaid ? "partially_paid" : "not_paid"}
+                                size="sm"
+                              />
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              {canRecordAnyPayment && participant && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPaymentTarget({
+                                      student,
+                                      participant,
+                                      remainingAmount: fin.remainingAmount,
+                                    });
+                                    setAmount(
+                                      fin.remainingAmount > 0 ? String(fin.remainingAmount) : "500"
+                                    );
+                                  }}
+                                  className="px-2.5 py-1 bg-teal-600 hover:bg-teal-500 text-white font-bold rounded-lg transition-all flex items-center gap-1 ml-auto cursor-pointer"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                  <span>Collect</span>
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -518,9 +562,14 @@ export const CollectionAssistantDashboard: React.FC = () => {
         >
           <form onSubmit={handleRecordPayment} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
-                Payment Amount (₹) *
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold text-slate-300 uppercase">
+                  Payment Amount (₹) *
+                </label>
+                <span className="text-[11px] text-slate-400 font-mono">
+                  Remaining Due: {formatINR(paymentTarget.remainingAmount)}
+                </span>
+              </div>
               <input
                 type="number"
                 required
@@ -532,7 +581,7 @@ export const CollectionAssistantDashboard: React.FC = () => {
               />
 
               {crossClassCapabilities.canAddInstallment && (
-                <div className="flex gap-2 mt-2">
+                <div className="flex flex-wrap gap-2 mt-2">
                   {[100, 250, 500, 1000].map((amt) => (
                     <button
                       key={amt}
@@ -543,6 +592,15 @@ export const CollectionAssistantDashboard: React.FC = () => {
                       +₹{amt}
                     </button>
                   ))}
+                  {paymentTarget.remainingAmount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setAmount(String(paymentTarget.remainingAmount))}
+                      className="px-2.5 py-1 bg-teal-950 hover:bg-teal-900 border border-teal-700 text-teal-300 text-xs font-mono rounded-lg transition-colors cursor-pointer"
+                    >
+                      Full Due (₹{paymentTarget.remainingAmount})
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -571,14 +629,14 @@ export const CollectionAssistantDashboard: React.FC = () => {
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
-                Reference / Note (Optional)
+                Reference / Notes (Optional)
               </label>
               <input
                 type="text"
-                placeholder="UPI ref or Cash note"
+                placeholder="e.g. UPI Ref / Cash Receipt #"
                 value={paymentRef}
                 onChange={(e) => setPaymentRef(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-teal-500"
+                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-teal-500"
               />
             </div>
 
@@ -595,7 +653,7 @@ export const CollectionAssistantDashboard: React.FC = () => {
                 disabled={submitting}
                 className="px-4 py-2 text-xs font-semibold text-white bg-teal-600 hover:bg-teal-500 rounded-xl flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
-                {submitting ? "Submitting..." : "Submit Payment Record"}
+                {submitting ? "Submitting..." : "Submit Collection"}
               </button>
             </div>
           </form>
@@ -607,28 +665,21 @@ export const CollectionAssistantDashboard: React.FC = () => {
         <Modal
           isOpen={!!declineTarget}
           onClose={() => setDeclineTarget(null)}
-          title="Decline Payment Record"
-          subtitle={`Payment: ${formatINR(declineTarget.amount)}`}
+          title="Decline Payment Submission"
+          subtitle={`Amount: ${formatINR(declineTarget.amount)}`}
           maxWidth="md"
         >
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleDecline();
-            }}
-            className="space-y-4"
-          >
+          <div className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
-                Decline Reason *
+                Reason for Declining
               </label>
               <textarea
                 rows={2}
-                required
-                placeholder="e.g. Amount mismatch / Duplicate entry"
+                placeholder="e.g. Duplicate submission / Mismatched transaction ID"
                 value={declineReason}
                 onChange={(e) => setDeclineReason(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-rose-500"
+                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-teal-500"
               />
             </div>
 
@@ -641,13 +692,14 @@ export const CollectionAssistantDashboard: React.FC = () => {
                 Cancel
               </button>
               <button
-                type="submit"
-                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 rounded-xl flex items-center gap-2 cursor-pointer"
+                type="button"
+                onClick={handleDecline}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 rounded-xl cursor-pointer"
               >
                 Confirm Decline
               </button>
             </div>
-          </form>
+          </div>
         </Modal>
       )}
     </div>

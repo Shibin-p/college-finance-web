@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   addDoc,
   updateDoc,
@@ -70,7 +71,7 @@ export async function addPayment(
 
   await logAudit({
     userId: user.uid,
-    userRole: user.role,
+    userRole: user.role === "super_coordinator" ? "Super Coordinator" : user.role === "class_coordinator" ? "Class Coordinator" : "Cross-Class Collection Assistant",
     userName: user.name,
     action: shouldApprove ? "add_and_approve_payment" : "submit_payment",
     category: "fund_collection",
@@ -79,7 +80,7 @@ export async function addPayment(
     studentId: params.studentId,
     paymentId: docRef.id,
     amount: params.amount,
-    description: `Added payment of ₹${params.amount} via ${params.paymentMethod} (${status})`,
+    description: `Logged payment of ₹${params.amount} via ${params.paymentMethod} (${status})`,
   });
 
   return {
@@ -90,9 +91,12 @@ export async function addPayment(
 
 export async function approvePayment(
   paymentId: string,
-  user: UserProfile
+  user: UserProfile,
+  actorRoleTitle?: string
 ): Promise<void> {
   const ref = doc(db, COLLECTIONS.PAYMENTS, paymentId);
+  const snap = await getDoc(ref);
+  const paymentData = snap.data() as PaymentModel | undefined;
   const now = serverTimestamp();
 
   await updateDoc(ref, {
@@ -103,20 +107,33 @@ export async function approvePayment(
     updatedAt: now,
   });
 
+  const roleToLog =
+    actorRoleTitle ||
+    (user.role === "super_coordinator"
+      ? "Super Coordinator"
+      : user.role === "class_coordinator"
+      ? "Class Coordinator"
+      : "Cross-Class Collection Assistant");
+
   await logAudit({
     userId: user.uid,
-    userRole: user.role,
+    userRole: roleToLog,
     userName: user.name,
-    action: "approve_payment",
+    action: "payment_approved",
     category: "fund_approval",
+    eventId: paymentData?.eventId,
+    classId: paymentData?.classId,
+    studentId: paymentData?.studentId,
     paymentId,
-    description: `Approved payment ${paymentId}`,
+    amount: paymentData?.amount,
+    description: `Approved payment of ₹${paymentData?.amount || 0} (${roleToLog})`,
   });
 }
 
 export async function batchApprovePayments(
   payments: PaymentModel[],
-  user: UserProfile
+  user: UserProfile,
+  actorRoleTitle?: string
 ): Promise<void> {
   if (payments.length === 0) return;
 
@@ -137,25 +154,37 @@ export async function batchApprovePayments(
   await batch.commit();
 
   const totalAmount = payments.reduce((acc, curr) => acc + (curr.amount || 0), 0);
+  const roleToLog =
+    actorRoleTitle ||
+    (user.role === "super_coordinator"
+      ? "Super Coordinator"
+      : "Cross-Class Collection Assistant");
 
   await logAudit({
     userId: user.uid,
-    userRole: user.role,
+    userRole: roleToLog,
     userName: user.name,
     action: "batch_approve_payments",
     category: "fund_approval",
     eventId: payments[0]?.eventId,
     amount: totalAmount,
-    description: `Batch approved ${payments.length} payments totaling ₹${totalAmount}`,
+    description: `Batch approved ${payments.length} payments totaling ₹${totalAmount} (${roleToLog})`,
+    metadata: {
+      paymentIds: payments.map((p) => p.id),
+      classIds: Array.from(new Set(payments.map((p) => p.classId))),
+    },
   });
 }
 
 export async function declinePayment(
   paymentId: string,
   reason: string,
-  user: UserProfile
+  user: UserProfile,
+  actorRoleTitle?: string
 ): Promise<void> {
   const ref = doc(db, COLLECTIONS.PAYMENTS, paymentId);
+  const snap = await getDoc(ref);
+  const paymentData = snap.data() as PaymentModel | undefined;
   const now = serverTimestamp();
 
   await updateDoc(ref, {
@@ -166,14 +195,26 @@ export async function declinePayment(
     updatedAt: now,
   });
 
+  const roleToLog =
+    actorRoleTitle ||
+    (user.role === "super_coordinator"
+      ? "Super Coordinator"
+      : user.role === "class_coordinator"
+      ? "Class Coordinator"
+      : "Cross-Class Collection Assistant");
+
   await logAudit({
     userId: user.uid,
-    userRole: user.role,
+    userRole: roleToLog,
     userName: user.name,
     action: "decline_payment",
     category: "fund_approval",
+    eventId: paymentData?.eventId,
+    classId: paymentData?.classId,
+    studentId: paymentData?.studentId,
     paymentId,
-    description: `Declined payment ${paymentId}. Reason: ${reason || "None specified"}`,
+    amount: paymentData?.amount,
+    description: `Declined payment of ₹${paymentData?.amount || 0}. Reason: ${reason || "None specified"} (${roleToLog})`,
   });
 }
 
@@ -183,6 +224,8 @@ export async function rollbackPayment(
   user: UserProfile
 ): Promise<void> {
   const ref = doc(db, COLLECTIONS.PAYMENTS, paymentId);
+  const snap = await getDoc(ref);
+  const paymentData = snap.data() as PaymentModel | undefined;
   const now = serverTimestamp();
 
   await updateDoc(ref, {
@@ -195,12 +238,16 @@ export async function rollbackPayment(
 
   await logAudit({
     userId: user.uid,
-    userRole: user.role,
+    userRole: user.role === "super_coordinator" ? "Super Coordinator" : user.role,
     userName: user.name,
     action: "rollback_payment",
     category: "payment_rollback",
+    eventId: paymentData?.eventId,
+    classId: paymentData?.classId,
+    studentId: paymentData?.studentId,
     paymentId,
-    description: `Rolled back approved payment ${paymentId}. Reason: ${reason || "None specified"}`,
+    amount: paymentData?.amount,
+    description: `Rolled back approved payment of ₹${paymentData?.amount || 0}. Reason: ${reason || "None specified"}`,
   });
 }
 
@@ -219,20 +266,26 @@ export async function fetchPayments(
     snap.forEach((d) => {
       list.push({ id: d.id, ...(d.data() as Omit<PaymentModel, "id">) });
     });
-    return list.sort((a, b) => {
-      const timeA = a.addedAt?.seconds ? a.addedAt.seconds * 1000 : new Date(a.addedAt || 0).getTime();
-      const timeB = b.addedAt?.seconds ? b.addedAt.seconds * 1000 : new Date(b.addedAt || 0).getTime();
-      return timeB - timeA;
-    });
+    return list;
   } catch (error) {
-    console.error(`Error fetching payments for event ${eventId}:`, error);
+    console.error("Error fetching payments:", error);
     return [];
   }
 }
 
-export async function fetchPaymentsByStudent(
-  studentId: string
-): Promise<PaymentModel[]> {
+export async function fetchPaymentById(paymentId: string): Promise<PaymentModel | null> {
+  try {
+    const ref = doc(db, COLLECTIONS.PAYMENTS, paymentId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...(snap.data() as Omit<PaymentModel, "id">) };
+  } catch (error) {
+    console.error("Error fetching payment by id:", error);
+    return null;
+  }
+}
+
+export async function fetchPaymentsByStudent(studentId: string): Promise<PaymentModel[]> {
   try {
     const ref = collection(db, COLLECTIONS.PAYMENTS);
     const q = query(ref, where("studentId", "==", studentId));
@@ -243,7 +296,7 @@ export async function fetchPaymentsByStudent(
     });
     return list;
   } catch (error) {
-    console.error(`Error fetching payments for student ${studentId}:`, error);
+    console.error("Error fetching payments by student:", error);
     return [];
   }
 }

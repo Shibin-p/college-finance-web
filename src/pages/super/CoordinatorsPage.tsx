@@ -160,7 +160,11 @@ export const CoordinatorsPage: React.FC = () => {
       setAuthorizedClassIds([]);
     }
 
-    setModalTab("class_coord");
+    if (selectedUser?.role === "view_coordinator") {
+      setModalTab("viewer");
+    } else {
+      setModalTab("class_coord");
+    }
     setEditModalOpen(true);
   };
 
@@ -184,10 +188,12 @@ export const CoordinatorsPage: React.FC = () => {
       }
 
       // 2. Determine assignment payload
+      const isViewer = targetUser.role === "view_coordinator";
       const assignmentPayload: Partial<CoordinatorAssignmentModel> = {
         userId: targetUser.uid,
         eventId: activeEvent.id,
-        classId: modalTab === "viewer" && viewerScope === "specific_class" ? viewerClassId : selectedClassId,
+        assignmentType: isViewer ? "view_coordinator" : "class_coordinator",
+        classId: isViewer ? (viewerScope === "specific_class" ? viewerClassId : "") : selectedClassId,
         active: true,
         permissions: classPerms,
         viewerScope,
@@ -206,6 +212,7 @@ export const CoordinatorsPage: React.FC = () => {
           {
             userId: targetUser.uid,
             eventId: activeEvent.id,
+            assignmentType: assignmentPayload.assignmentType,
             classId: assignmentPayload.classId,
             permissions: classPerms,
             viewerScope,

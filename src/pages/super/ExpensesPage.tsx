@@ -26,7 +26,13 @@ import {
   Tags,
   Check,
   X,
+  FileSpreadsheet,
+  FileText,
 } from "lucide-react";
+import {
+  exportExpensesExcel,
+  exportExpensesPDF,
+} from "../../services/exportService";
 
 export const ExpensesPage: React.FC = () => {
   const { activeEvent, refreshEvents } = useEvent();
@@ -34,6 +40,7 @@ export const ExpensesPage: React.FC = () => {
 
   const [expenses, setExpenses] = useState<ExpenseModel[]>([]);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
 
   // Create Expense Modal
@@ -192,12 +199,42 @@ export const ExpensesPage: React.FC = () => {
     return true;
   });
 
+  const handleExportExcel = async () => {
+    if (!activeEvent || !userProfile) return;
+    setExporting(true);
+    try {
+      await exportExpensesExcel(activeEvent.name, expenses, userProfile);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExportPDF = async () => {
+    if (!activeEvent || !userProfile) return;
+    setExporting(true);
+    try {
+      await exportExpensesPDF(activeEvent.name, expenses, userProfile);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 glass-panel p-6 rounded-3xl border border-slate-800">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 glass-panel p-5 sm:p-6 rounded-3xl border border-slate-800">
         <div>
-          <h1 className="text-2xl font-extrabold text-white tracking-tight">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+              Super Coordinator Finance
+            </span>
+            <span className="text-xs text-slate-400">• {activeEvent?.name}</span>
+          </div>
+          <h1 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
             Event Expenditures Register
           </h1>
           <p className="text-xs text-slate-400 mt-1">
@@ -205,24 +242,46 @@ export const ExpensesPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="px-3.5 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs">
-            <span className="text-slate-400">Total Spent: </span>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="px-3.5 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs flex items-center gap-1.5">
+            <span className="text-slate-400">Total Spent:</span>
             <span className="font-mono font-bold text-rose-400">{formatINR(totalActiveSpent)}</span>
           </div>
 
           <button
             type="button"
-            onClick={() => setCategoryModalOpen(true)}
-            className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer"
+            onClick={handleExportExcel}
+            disabled={exporting || expenses.length === 0}
+            title="Export Excel"
+            className="px-3 py-2 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-800/80 text-emerald-300 font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
           >
-            <Tags className="w-4 h-4 text-emerald-400" />
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Excel</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportPDF}
+            disabled={exporting || expenses.length === 0}
+            title="Export PDF"
+            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+          >
+            <FileText className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden sm:inline">PDF</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setCategoryModalOpen(true)}
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer"
+          >
+            <Tags className="w-3.5 h-3.5 text-emerald-400" />
             <span>Categories</span>
           </button>
 
           <button
             onClick={() => setCreateModalOpen(true)}
-            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/25 transition-all flex items-center gap-2 shrink-0 cursor-pointer"
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/25 transition-all flex items-center gap-1.5 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Add Expenditure</span>

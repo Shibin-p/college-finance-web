@@ -229,7 +229,7 @@ export interface AuditLogModel {
   id: string;
   timestamp: any;
   userId: string;
-  userRole: UserRole;
+  userRole: UserRole | string;
   userName?: string;
   action: string;
   category: AuditCategory;

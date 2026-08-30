@@ -16,7 +16,7 @@ import type { AuditCategory, AuditLogModel, UserRole } from "../types";
 
 export interface LogAuditParams {
   userId: string;
-  userRole: UserRole;
+  userRole: UserRole | string;
   userName?: string;
   action: string;
   category: AuditCategory;

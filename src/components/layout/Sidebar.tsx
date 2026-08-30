@@ -20,11 +20,12 @@ import {
   Clock,
   DownloadCloud,
   Layers,
+  Sparkles,
 } from "lucide-react";
 
 export const Sidebar: React.FC = () => {
   const { userProfile } = useAuth();
-  const { isCrossClassAssistant, isClassCoordinator } = usePermissions();
+  const { isCrossClassAssistant, viewerPermissions } = usePermissions();
   if (!userProfile) return null;
 
   const superLinks = [
@@ -59,47 +60,117 @@ export const Sidebar: React.FC = () => {
     { to: "/viewer/classes", icon: Users, label: "Class-wise Stats" },
   ];
 
-  const assistantLinks = [
-    { to: "/collection-assistant/dashboard", icon: Layers, label: "Collection Assistant" },
-  ];
-
-  let links = superLinks;
-  if (userProfile.role === "class_coordinator") {
-    links = [...coordinatorLinks];
-    if (isCrossClassAssistant) {
-      links.push(...assistantLinks);
-    }
-  } else if (userProfile.role === "view_coordinator") {
-    links = [...viewerLinks];
-    if (isCrossClassAssistant) {
-      links.push(...assistantLinks);
-    }
-  } else if (isCrossClassAssistant && !isClassCoordinator && userProfile.role !== "super_coordinator") {
-    links = assistantLinks;
+  if (viewerPermissions.canViewExpenses) {
+    viewerLinks.push({ to: "/viewer/expenses", icon: CreditCard, label: "Expenditures" });
   }
 
+  const assistantLinks = [
+    { to: "/collection-assistant/dashboard", icon: Layers, label: "Assistant Workspace" },
+  ];
+
   return (
-    <aside className="hidden lg:flex flex-col w-64 border-r border-slate-800 bg-slate-950/60 p-4 shrink-0 overflow-y-auto">
-      <div className="space-y-1">
-        {links.map((link) => {
-          const Icon = link.icon;
-          return (
-            <NavLink
-              key={link.to}
-              to={link.to}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all duration-150 ${
-                  isActive
-                    ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-sm"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                }`
-              }
-            >
-              <Icon className="w-4 h-4 shrink-0" />
-              <span>{link.label}</span>
-            </NavLink>
-          );
-        })}
+    <aside className="hidden lg:flex flex-col w-64 border-r border-slate-800 bg-slate-950/60 p-4 shrink-0 overflow-y-auto justify-between">
+      <div className="space-y-6">
+        {/* Primary Role Navigation */}
+        <div className="space-y-1">
+          {userProfile.role === "super_coordinator" &&
+            superLinks.map((link) => {
+              const Icon = link.icon;
+              return (
+                <NavLink
+                  key={link.to}
+                  to={link.to}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all duration-150 ${
+                      isActive
+                        ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-sm"
+                        : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                    }`
+                  }
+                >
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span>{link.label}</span>
+                </NavLink>
+              );
+            })}
+
+          {userProfile.role === "class_coordinator" &&
+            coordinatorLinks.map((link) => {
+              const Icon = link.icon;
+              return (
+                <NavLink
+                  key={link.to}
+                  to={link.to}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all duration-150 ${
+                      isActive
+                        ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-sm"
+                        : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                    }`
+                  }
+                >
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span>{link.label}</span>
+                </NavLink>
+              );
+            })}
+
+          {userProfile.role === "view_coordinator" &&
+            viewerLinks.map((link) => {
+              const Icon = link.icon;
+              return (
+                <NavLink
+                  key={link.to}
+                  to={link.to}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all duration-150 ${
+                      isActive
+                        ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-sm"
+                        : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                    }`
+                  }
+                >
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span>{link.label}</span>
+                </NavLink>
+              );
+            })}
+        </div>
+
+        {/* Cross-Class Collection Assistant Capability Section */}
+        {isCrossClassAssistant && userProfile.role !== "super_coordinator" && (
+          <div className="pt-4 border-t border-slate-800/80 space-y-2">
+            <div className="px-2 flex items-center justify-between">
+              <span className="text-[10px] font-bold text-teal-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles className="w-3 h-3 text-teal-400" />
+                <span>Special Access</span>
+              </span>
+              <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-teal-500/20 text-teal-300 font-mono">
+                Active
+              </span>
+            </div>
+
+            {assistantLinks.map((link) => {
+              const Icon = link.icon;
+              return (
+                <NavLink
+                  key={link.to}
+                  to={link.to}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all duration-150 ${
+                      isActive
+                        ? "bg-teal-500/25 text-teal-200 border border-teal-500/40 shadow-sm"
+                        : "text-teal-300/80 hover:text-teal-100 hover:bg-teal-950/40 border border-teal-500/20"
+                    }`
+                  }
+                >
+                  <Icon className="w-4 h-4 shrink-0 text-teal-400" />
+                  <span>{link.label}</span>
+                </NavLink>
+              );
+            })}
+          </div>
+        )}
       </div>
     </aside>
   );

@@ -33,6 +33,8 @@ const defaultCrossClassCapabilities: CrossClassCapabilities = {
   canHandlePendingApprovals: false,
 };
 
+export type AvailableWorkspace = "super" | "class_coordinator" | "view_coordinator" | "collection_assistant";
+
 export function usePermissions(classId?: string) {
   const { userProfile } = useAuth();
   const { activeEvent } = useEvent();
@@ -82,6 +84,7 @@ export function usePermissions(classId?: string) {
       crossClassAuthorizedClassIds: [] as string[],
       assignedClassIds: [] as string[],
       hasAccessToClass: false,
+      availableWorkspaces: [] as AvailableWorkspace[],
       loading: false,
     };
   }
@@ -120,18 +123,19 @@ export function usePermissions(classId?: string) {
       crossClassAuthorizedClassIds: [] as string[],
       assignedClassIds: [] as string[],
       hasAccessToClass: true,
+      availableWorkspaces: ["super", "class_coordinator", "view_coordinator", "collection_assistant"] as AvailableWorkspace[],
       loading: false,
     };
   }
 
-  // Filter active assignments for the current active event
+  // Filter active assignments for the current active event (or fallback to any active assignment if event loading)
   const currentEventAssignments = assignments.filter(
     (a) => a.active && (!activeEvent || a.eventId === activeEvent.id)
   );
 
   // Normal Class Coordinator assignments
   const classAssignments = currentEventAssignments.filter(
-    (a) => !a.assignmentType || a.assignmentType === "class_coordinator"
+    (a) => a.assignmentType === "class_coordinator" || (!a.assignmentType && a.classId)
   );
   const assignedClassIds = classAssignments.map((a) => a.classId || "").filter(Boolean);
 
@@ -152,9 +156,9 @@ export function usePermissions(classId?: string) {
     ...(viewAssignment?.viewerPermissions || {}),
   };
 
-  // Cross-Class Collection Assistant assignment
+  // Cross-Class Collection Assistant assignment (found across any active assignment for the event)
   const crossClassAssignment = currentEventAssignments.find(
-    (a) => a.crossClassCollection?.enabled || a.assignmentType === "cross_class_assistant"
+    (a) => Boolean(a.crossClassCollection?.enabled)
   );
 
   const isCrossClassAssistant = Boolean(crossClassAssignment?.crossClassCollection?.enabled);
@@ -182,6 +186,18 @@ export function usePermissions(classId?: string) {
       isViewCoordinator;
   }
 
+  // Calculate available workspaces for the user
+  const availableWorkspaces: AvailableWorkspace[] = [];
+  if (isClassCoordinator) {
+    availableWorkspaces.push("class_coordinator");
+  }
+  if (isViewCoordinator) {
+    availableWorkspaces.push("view_coordinator");
+  }
+  if (isCrossClassAssistant) {
+    availableWorkspaces.push("collection_assistant");
+  }
+
   return {
     isSuper: false,
     isClassCoordinator,
@@ -194,6 +210,7 @@ export function usePermissions(classId?: string) {
     crossClassAuthorizedClassIds,
     assignedClassIds,
     hasAccessToClass,
+    availableWorkspaces,
     loading,
   };
 }

@@ -2,7 +2,7 @@ import React from "react";
 
 export const Footer: React.FC = () => {
   return (
-    <footer className="mt-auto py-4 px-4 border-t border-slate-800/80 bg-slate-950/60 text-center text-xs text-slate-500">
+    <footer className="w-full py-4 px-4 border-t border-slate-800/80 bg-slate-950/80 text-center text-xs text-slate-500">
       <div className="flex flex-col items-center justify-center max-w-7xl mx-auto space-y-1">
         <p className="font-medium text-slate-400 text-xs">
           © 2026 EKCTC Finance. All rights reserved.

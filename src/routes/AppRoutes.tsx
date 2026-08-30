@@ -34,6 +34,7 @@ import { MySubmissionsPage } from "../pages/coordinator/MySubmissionsPage";
 import { ViewerDashboard } from "../pages/viewer/ViewerDashboard";
 import { ViewerYearStats } from "../pages/viewer/ViewerYearStats";
 import { ViewerClassStats } from "../pages/viewer/ViewerClassStats";
+import { ViewerExpensesPage } from "../pages/viewer/ViewerExpensesPage";
 
 // Cross-Class Collection Assistant Page
 import { CollectionAssistantDashboard } from "../pages/assistant/CollectionAssistantDashboard";
@@ -134,6 +135,7 @@ export const AppRoutes: React.FC = () => {
           <Route path="/viewer/dashboard" element={<ViewerDashboard />} />
           <Route path="/viewer/years" element={<ViewerYearStats />} />
           <Route path="/viewer/classes" element={<ViewerClassStats />} />
+          <Route path="/viewer/expenses" element={<ViewerExpensesPage />} />
         </Route>
       </Route>
 

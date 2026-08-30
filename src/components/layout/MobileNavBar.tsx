@@ -16,7 +16,7 @@ export const MobileNavBar: React.FC<{ onOpenMobileMenu?: () => void }> = ({
   onOpenMobileMenu,
 }) => {
   const { userProfile } = useAuth();
-  const { isCrossClassAssistant, isClassCoordinator } = usePermissions();
+  const { isCrossClassAssistant } = usePermissions();
   if (!userProfile) return null;
 
   const coordinatorTabs = [
@@ -39,17 +39,23 @@ export const MobileNavBar: React.FC<{ onOpenMobileMenu?: () => void }> = ({
     { to: "/viewer/classes", icon: Coins, label: "Classes" },
   ];
 
-  const assistantTabs = [
-    { to: "/collection-assistant/dashboard", icon: Layers, label: "Assistant" },
-  ];
+  const assistantTab = {
+    to: "/collection-assistant/dashboard",
+    icon: Layers,
+    label: "Assistant",
+  };
 
-  let tabs = superTabs;
+  let tabs = [...superTabs];
   if (userProfile.role === "class_coordinator") {
-    tabs = coordinatorTabs;
+    tabs = [...coordinatorTabs];
+    if (isCrossClassAssistant) {
+      tabs.push(assistantTab);
+    }
   } else if (userProfile.role === "view_coordinator") {
-    tabs = viewerTabs;
-  } else if (isCrossClassAssistant && !isClassCoordinator && userProfile.role !== "super_coordinator") {
-    tabs = assistantTabs;
+    tabs = [...viewerTabs];
+    if (isCrossClassAssistant) {
+      tabs.push(assistantTab);
+    }
   }
 
   return (
@@ -62,7 +68,7 @@ export const MobileNavBar: React.FC<{ onOpenMobileMenu?: () => void }> = ({
               key={tab.to}
               to={tab.to}
               className={({ isActive }) =>
-                `flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all ${
+                `flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-all ${
                   isActive
                     ? "text-emerald-400 font-bold scale-105"
                     : "text-slate-400 hover:text-slate-200"
@@ -79,7 +85,7 @@ export const MobileNavBar: React.FC<{ onOpenMobileMenu?: () => void }> = ({
           <button
             type="button"
             onClick={onOpenMobileMenu}
-            className="flex flex-col items-center justify-center py-1 px-3 text-slate-400 hover:text-slate-200"
+            className="flex flex-col items-center justify-center py-1 px-2.5 text-slate-400 hover:text-slate-200 cursor-pointer"
           >
             <Menu className="w-5 h-5 mb-0.5" />
             <span className="text-[10px] tracking-tight">More</span>
