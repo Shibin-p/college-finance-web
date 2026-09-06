@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useEvent } from "../../hooks/useEvent";
 import { usePermissions } from "../../hooks/usePermissions";
-import { fetchEventParticipants, fetchAllStudents } from "../../services/studentService";
+import { fetchEffectiveEventParticipants, fetchAllStudents } from "../../services/studentService";
 import { fetchPayments } from "../../services/paymentService";
 import { fetchExpenses } from "../../services/expenseService";
 import { fetchAdjustments } from "../../services/adjustmentService";
@@ -46,13 +46,16 @@ export const ViewerDashboard: React.FC = () => {
   // Student search state
   const [studentSearch, setStudentSearch] = useState("");
 
+  const activeClasses = classes.filter((c) => c.active !== false);
+  const activeClassIds = new Set(activeClasses.map((c) => c.id));
+
   useEffect(() => {
     if (!activeEvent) return;
     const load = async () => {
       setLoading(true);
       try {
         const promises: Promise<any>[] = [
-          fetchEventParticipants(activeEvent.id),
+          fetchEffectiveEventParticipants(activeEvent, activeClasses),
           fetchPayments(activeEvent.id),
           fetchAdjustments(activeEvent.id),
         ];
@@ -66,14 +69,21 @@ export const ViewerDashboard: React.FC = () => {
         }
 
         const [parts, pays, adjs, exps, studs] = await Promise.all(promises);
+        const eligiblePayments = (pays || []).filter(
+          (p: PaymentModel) => !p.classId || activeClassIds.has(p.classId)
+        );
+        const eligibleStuds = (studs || []).filter(
+          (s: StudentModel) => !s.classId || activeClassIds.has(s.classId)
+        );
+
         setParticipants(parts || []);
-        setPayments(pays || []);
+        setPayments(eligiblePayments);
         setAdjustments(adjs || []);
         if (viewerPermissions.canViewExpenses && exps) {
           setExpenses(exps);
         }
         if (viewerPermissions.canViewStudentCollectionStatus && studs) {
-          setStudents(studs);
+          setStudents(eligibleStuds);
         }
       } catch (err) {
         console.error(err);
@@ -84,6 +94,7 @@ export const ViewerDashboard: React.FC = () => {
     load();
   }, [
     activeEvent?.id,
+    classes,
     viewerPermissions.canViewExpenses,
     viewerPermissions.canViewExpenseCategories,
     viewerPermissions.canViewStudentCollectionStatus,

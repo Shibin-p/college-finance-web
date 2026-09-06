@@ -78,11 +78,13 @@ export const CollectionManagement: React.FC = () => {
     participant: EventParticipantModel;
   } | null>(null);
 
+  const activeClasses = classes.filter((c) => c.active !== false);
+
   useEffect(() => {
-    if (classes.length > 0 && !selectedClassId) {
-      setSelectedClassId(classes[0].id);
+    if (activeClasses.length > 0 && (!selectedClassId || !activeClasses.some((c) => c.id === selectedClassId))) {
+      setSelectedClassId(activeClasses[0].id);
     }
-  }, [classes]);
+  }, [activeClasses]);
 
   const loadData = async () => {
     if (!activeEvent || !selectedClassId) return;
@@ -163,7 +165,14 @@ export const CollectionManagement: React.FC = () => {
         exemptionTarget.participant.id,
         !exemptionTarget.participant.exemption,
         exemptionReason,
-        userProfile
+        userProfile,
+        {
+          eventId: activeEvent?.id,
+          classId: selectedClassId,
+          studentId: exemptionTarget.student.id,
+          requiredAmount: exemptionTarget.participant.requiredAmount,
+          targetAmountEnabled: exemptionTarget.participant.targetAmountEnabled,
+        }
       );
       await loadData();
       setExemptionTarget(null);
@@ -186,7 +195,14 @@ export const CollectionManagement: React.FC = () => {
         waiverTarget.participant.id,
         !waiverTarget.participant.coordinatorWaiver,
         numWaiver,
-        userProfile
+        userProfile,
+        {
+          eventId: activeEvent?.id,
+          classId: selectedClassId,
+          studentId: waiverTarget.student.id,
+          requiredAmount: waiverTarget.participant.requiredAmount,
+          targetAmountEnabled: waiverTarget.participant.targetAmountEnabled,
+        }
       );
       await loadData();
       setWaiverTarget(null);
@@ -262,7 +278,7 @@ export const CollectionManagement: React.FC = () => {
             onChange={(e) => setSelectedClassId(e.target.value)}
             className="px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-bold text-slate-100 focus:outline-none focus:border-emerald-500 cursor-pointer"
           >
-            {classes.map((cls) => (
+            {activeClasses.map((cls) => (
               <option key={cls.id} value={cls.id}>
                 {cls.displayName} ({cls.department})
               </option>

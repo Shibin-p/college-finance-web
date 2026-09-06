@@ -21,11 +21,13 @@ export interface CreateCentralReceiptParams {
   date: string;
   time?: string;
   remarks?: string;
+  assignmentId?: string;
 }
 
 export async function createCentralReceipt(
   params: CreateCentralReceiptParams,
-  user: UserProfile
+  user: UserProfile,
+  actorRoleTitle?: string
 ): Promise<CentralReceiptModel> {
   const sum = (params.cashAmount || 0) + (params.digitalAmount || 0) + (params.otherAmount || 0);
   if (sum !== params.totalAmount) {
@@ -33,6 +35,14 @@ export async function createCentralReceipt(
       `Discrepancy: Cash (₹${params.cashAmount}) + Digital (₹${params.digitalAmount}) + Other (₹${params.otherAmount}) = ₹${sum}, which does not match Total Amount (₹${params.totalAmount})`
     );
   }
+
+  const roleTitle =
+    actorRoleTitle ||
+    (user.role === "super_coordinator"
+      ? "Super Coordinator"
+      : user.role === "class_coordinator"
+      ? "Class Coordinator"
+      : "Cross-Class Collection Assistant");
 
   const ref = collection(db, COLLECTIONS.CENTRAL_RECEIPTS);
   const now = serverTimestamp();
@@ -48,24 +58,29 @@ export async function createCentralReceipt(
     time: params.time || new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
     receivedBy: user.uid,
     receivedByName: user.name,
+    receivedByRole: roleTitle,
     remarks: params.remarks?.trim() || "",
     createdAt: now,
     updatedAt: now,
   };
 
+  if (params.assignmentId) {
+    data.assignmentId = params.assignmentId;
+  }
+
   const docRef = await addDoc(ref, data);
 
   await logAudit({
     userId: user.uid,
-    userRole: user.role,
+    userRole: roleTitle,
     userName: user.name,
-    action: "create_central_receipt",
+    action: "CENTRAL_RECEIPT_CREATED",
     category: "central_receipt",
     eventId: params.eventId,
     classId: params.classId,
     receiptId: docRef.id,
     amount: params.totalAmount,
-    description: `Recorded central receipt of ₹${params.totalAmount} (Cash: ₹${params.cashAmount}, UPI: ₹${params.digitalAmount})`,
+    description: `Recorded central receipt of ₹${params.totalAmount} (Cash: ₹${params.cashAmount}, Digital: ₹${params.digitalAmount}) by ${roleTitle}`,
   });
 
   return {

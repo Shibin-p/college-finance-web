@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useEvent } from "../../hooks/useEvent";
 import { usePermissions } from "../../hooks/usePermissions";
-import { fetchEventParticipants, fetchAllStudents } from "../../services/studentService";
+import { fetchEffectiveEventParticipants, fetchAllStudents } from "../../services/studentService";
 import { fetchPayments } from "../../services/paymentService";
 import {
   calculateClassWiseViewerStats,
@@ -36,13 +36,16 @@ export const ViewerClassStats: React.FC = () => {
   const [selectedClassId, setSelectedClassId] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
 
+  const activeClasses = classes.filter((c) => c.active !== false);
+  const activeClassIds = new Set(activeClasses.map((c) => c.id));
+
   useEffect(() => {
     if (!activeEvent) return;
     const load = async () => {
       setLoading(true);
       try {
         const promises: Promise<any>[] = [
-          fetchEventParticipants(activeEvent.id),
+          fetchEffectiveEventParticipants(activeEvent, activeClasses),
           fetchPayments(activeEvent.id),
         ];
 
@@ -51,10 +54,17 @@ export const ViewerClassStats: React.FC = () => {
         }
 
         const [parts, pays, studs] = await Promise.all(promises);
+        const eligiblePayments = (pays || []).filter(
+          (p: PaymentModel) => !p.classId || activeClassIds.has(p.classId)
+        );
+        const eligibleStuds = (studs || []).filter(
+          (s: StudentModel) => !s.classId || activeClassIds.has(s.classId)
+        );
+
         setParticipants(parts || []);
-        setPayments(pays || []);
+        setPayments(eligiblePayments);
         if (viewerPermissions.canViewStudentCollectionStatus && studs) {
-          setStudents(studs);
+          setStudents(eligibleStuds);
         }
       } catch (err) {
         console.error(err);
@@ -63,10 +73,10 @@ export const ViewerClassStats: React.FC = () => {
       }
     };
     load();
-  }, [activeEvent?.id, viewerPermissions.canViewStudentCollectionStatus]);
+  }, [activeEvent?.id, classes, viewerPermissions.canViewStudentCollectionStatus]);
 
   // Mode A: Class Overall Metrics
-  const classSummaries = classes.map((cls) =>
+  const classSummaries = activeClasses.map((cls) =>
     calculateClassWiseViewerStats(cls, participants, payments)
   );
 
@@ -265,8 +275,8 @@ export const ViewerClassStats: React.FC = () => {
                     onChange={(e) => setSelectedClassId(e.target.value)}
                     className="px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-bold text-slate-100 focus:outline-none focus:border-teal-500"
                   >
-                    <option value="all">All Classes ({classes.length})</option>
-                    {classes.map((cls) => (
+                    <option value="all">All Classes ({activeClasses.length})</option>
+                    {activeClasses.map((cls) => (
                       <option key={cls.id} value={cls.id}>
                         {cls.displayName} ({cls.department})
                       </option>

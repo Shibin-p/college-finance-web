@@ -31,6 +31,7 @@ const defaultCrossClassCapabilities: CrossClassCapabilities = {
   canAddPayment: false,
   canAddInstallment: false,
   canHandlePendingApprovals: false,
+  canAccessCentralReceipts: false,
 };
 
 export type AvailableWorkspace = "super" | "class_coordinator" | "view_coordinator" | "collection_assistant";
@@ -119,6 +120,7 @@ export function usePermissions(classId?: string) {
         canAddPayment: true,
         canAddInstallment: true,
         canHandlePendingApprovals: true,
+        canAccessCentralReceipts: true,
       },
       crossClassAuthorizedClassIds: [] as string[],
       assignedClassIds: [] as string[],

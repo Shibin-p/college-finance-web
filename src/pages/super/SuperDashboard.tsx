@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useEvent } from "../../hooks/useEvent";
-import { fetchEventParticipants } from "../../services/studentService";
+import { fetchEffectiveEventParticipants } from "../../services/studentService";
 import { fetchPayments } from "../../services/paymentService";
 import { fetchExpenses } from "../../services/expenseService";
 import { fetchAdjustments } from "../../services/adjustmentService";
@@ -37,7 +37,7 @@ import {
 import { useNavigate } from "react-router-dom";
 
 export const SuperDashboard: React.FC = () => {
-  const { activeEvent } = useEvent();
+  const { activeEvent, classes } = useEvent();
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
@@ -48,6 +48,9 @@ export const SuperDashboard: React.FC = () => {
   const [centralReceipts, setCentralReceipts] = useState<CentralReceiptModel[]>([]);
   const [countMode, setCountMode] = useState<CountMode>("fully_paid");
 
+  const activeClasses = classes.filter((c) => c.active !== false);
+  const activeClassIds = new Set(activeClasses.map((c) => c.id));
+
   const loadDashboardData = async () => {
     if (!activeEvent) {
       setLoading(false);
@@ -56,14 +59,17 @@ export const SuperDashboard: React.FC = () => {
     setLoading(true);
     try {
       const [partsData, paysData, expData, adjData, rcptData] = await Promise.all([
-        fetchEventParticipants(activeEvent.id),
+        fetchEffectiveEventParticipants(activeEvent, activeClasses),
         fetchPayments(activeEvent.id),
         fetchExpenses(activeEvent.id),
         fetchAdjustments(activeEvent.id),
         fetchCentralReceipts(activeEvent.id),
       ]);
+      // Active class collection eligibility: only active classes participate in collection totals
+      const eligiblePayments = paysData.filter((p) => !p.classId || activeClassIds.has(p.classId));
+
       setParticipants(partsData);
-      setPayments(paysData);
+      setPayments(eligiblePayments);
       setExpenses(expData);
       setAdjustments(adjData);
       setCentralReceipts(rcptData);
@@ -76,7 +82,7 @@ export const SuperDashboard: React.FC = () => {
 
   useEffect(() => {
     loadDashboardData();
-  }, [activeEvent?.id]);
+  }, [activeEvent?.id, classes]);
 
   const totals = calculateAggregateTotals(participants, payments, adjustments, expenses);
   const reconciliation = calculateReconciliation(payments, centralReceipts);

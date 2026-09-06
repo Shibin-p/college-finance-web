@@ -76,6 +76,7 @@ export const CoordinatorsPage: React.FC = () => {
     canAddPayment: true,
     canAddInstallment: true,
     canHandlePendingApprovals: false,
+    canAccessCentralReceipts: false,
   });
 
   const [saveLoading, setSaveLoading] = useState(false);
@@ -148,16 +149,24 @@ export const CoordinatorsPage: React.FC = () => {
       });
       setCrossClassEnabled(Boolean(existing.crossClassCollection?.enabled));
       setAuthorizedClassIds(existing.crossClassCollection?.authorizedClassIds || []);
-      setCrossClassCaps(existing.crossClassCollection?.capabilities || {
-        canViewCollection: true,
-        canAddPayment: true,
-        canAddInstallment: true,
-        canHandlePendingApprovals: false,
+      setCrossClassCaps({
+        canViewCollection: existing.crossClassCollection?.capabilities?.canViewCollection ?? true,
+        canAddPayment: existing.crossClassCollection?.capabilities?.canAddPayment ?? true,
+        canAddInstallment: existing.crossClassCollection?.capabilities?.canAddInstallment ?? true,
+        canHandlePendingApprovals: existing.crossClassCollection?.capabilities?.canHandlePendingApprovals ?? false,
+        canAccessCentralReceipts: existing.crossClassCollection?.capabilities?.canAccessCentralReceipts ?? false,
       });
     } else {
       setSelectedClassId(classes[0]?.id || "");
       setViewerClassId(classes[0]?.id || "");
       setAuthorizedClassIds([]);
+      setCrossClassCaps({
+        canViewCollection: true,
+        canAddPayment: true,
+        canAddInstallment: true,
+        canHandlePendingApprovals: false,
+        canAccessCentralReceipts: false,
+      });
     }
 
     if (selectedUser?.role === "view_coordinator") {
@@ -952,6 +961,26 @@ export const CoordinatorsPage: React.FC = () => {
                           <span className="font-semibold block">Handle Pending Approvals</span>
                           <span className="text-[10px] text-slate-400">
                             Approve/decline other payments in authorized classes (Self-approval strictly prevented)
+                          </span>
+                        </div>
+                      </label>
+
+                      <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer p-2 rounded-lg hover:bg-slate-900">
+                        <input
+                          type="checkbox"
+                          checked={crossClassCaps.canAccessCentralReceipts || false}
+                          onChange={(e) =>
+                            setCrossClassCaps({
+                              ...crossClassCaps,
+                              canAccessCentralReceipts: e.target.checked,
+                            })
+                          }
+                          className="rounded bg-slate-900 border-slate-700 text-teal-500 h-4 w-4"
+                        />
+                        <div>
+                          <span className="font-semibold block">Access Central Receipts</span>
+                          <span className="text-[10px] text-slate-400">
+                            Record central cash/digital receipts for authorized classes
                           </span>
                         </div>
                       </label>

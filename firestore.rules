@@ -36,6 +36,37 @@ service cloud.firestore {
         get(/databases/$(database)/documents/events/$(eventId)).data.status == 'active';
     }
 
+    function isClassActive(classId) {
+      return exists(/databases/$(database)/documents/classes/$(classId)) &&
+        (!('active' in get(/databases/$(database)/documents/classes/$(classId)).data) ||
+         get(/databases/$(database)/documents/classes/$(classId)).data.active == true);
+    }
+
+    // Cross-Class Assistant Central Receipts server-side permission check
+    function hasCentralReceiptsPermission(eventId, classId) {
+      let deterministicPath = /databases/$(database)/documents/coordinatorAssignments/$(request.auth.uid + '_' + eventId);
+      let customPath = ('assignmentId' in request.resource.data) ? 
+        /databases/$(database)/documents/coordinatorAssignments/$(request.resource.data.assignmentId) : 
+        deterministicPath;
+      let hasDeterministic = exists(deterministicPath);
+      let hasCustom = exists(customPath);
+      let assignmentDoc = hasDeterministic ? get(deterministicPath) : (hasCustom ? get(customPath) : null);
+
+      return assignmentDoc != null &&
+        assignmentDoc.data.userId == request.auth.uid &&
+        assignmentDoc.data.eventId == eventId &&
+        assignmentDoc.data.active == true &&
+        ('crossClassCollection' in assignmentDoc.data) &&
+        assignmentDoc.data.crossClassCollection.enabled == true &&
+        ('capabilities' in assignmentDoc.data.crossClassCollection) &&
+        assignmentDoc.data.crossClassCollection.capabilities.canAccessCentralReceipts == true &&
+        (
+          !('authorizedClassIds' in assignmentDoc.data.crossClassCollection) ||
+          assignmentDoc.data.crossClassCollection.authorizedClassIds.size() == 0 ||
+          classId in assignmentDoc.data.crossClassCollection.authorizedClassIds
+        );
+    }
+
     // 1. Users collection: Any authenticated user can read their own profile; Super/Class/View coordinators can read user list
     match /users/{userId} {
       allow read: if isSignedIn() && (request.auth.uid == userId || isSuperCoordinator() || isClassCoordinator() || isViewCoordinator());
@@ -70,10 +101,11 @@ service cloud.firestore {
     // 6. Payments
     match /payments/{paymentId} {
       allow read: if isActiveUser();
-      // Class coordinator or authorized collection assistant can submit pending payment with their own addedBy
+      // Class coordinator or authorized collection assistant can submit pending payment with their own addedBy for active classes
       allow create: if isSuperCoordinator() || (
         isActiveUser() &&
         isEventActive(request.resource.data.eventId) &&
+        isClassActive(request.resource.data.classId) &&
         request.resource.data.addedBy == request.auth.uid &&
         request.resource.data.status == 'pending_approval'
       );
@@ -93,10 +125,17 @@ service cloud.firestore {
       allow delete: if isSuperCoordinator();
     }
 
-    // 7. Central Receipts
+    // 7. Central Receipts (Super Coordinator OR Cross-Class Assistant with verified server-side permission)
     match /centralReceipts/{receiptId} {
       allow read: if isActiveUser();
-      allow write: if isSuperCoordinator();
+      allow create: if isSuperCoordinator() || (
+        isActiveUser() &&
+        isEventActive(request.resource.data.eventId) &&
+        isClassActive(request.resource.data.classId) &&
+        request.resource.data.receivedBy == request.auth.uid &&
+        hasCentralReceiptsPermission(request.resource.data.eventId, request.resource.data.classId)
+      );
+      allow update, delete: if isSuperCoordinator();
     }
 
     // 8. Expenses

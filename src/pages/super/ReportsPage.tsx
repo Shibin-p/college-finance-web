@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useEvent } from "../../hooks/useEvent";
 import { useAuth } from "../../hooks/useAuth";
-import { fetchEventParticipants } from "../../services/studentService";
+import { fetchEffectiveEventParticipants } from "../../services/studentService";
 import { fetchPayments } from "../../services/paymentService";
 import {
   calculateAggregateTotals,
@@ -37,25 +37,31 @@ export const ReportsPage: React.FC = () => {
   const [reportMode, setReportMode] = useState<ReportMode>("class_wise");
   const [exporting, setExporting] = useState(false);
 
+  const activeClasses = classes.filter((c) => c.active !== false);
+  const activeClassIds = new Set(activeClasses.map((c) => c.id));
+
   useEffect(() => {
     if (!activeEvent) return;
     const load = async () => {
       try {
         const [parts, pays] = await Promise.all([
-          fetchEventParticipants(activeEvent.id),
+          fetchEffectiveEventParticipants(activeEvent, activeClasses),
           fetchPayments(activeEvent.id),
         ]);
+        const eligiblePayments = (pays || []).filter(
+          (p: PaymentModel) => !p.classId || activeClassIds.has(p.classId)
+        );
         setParticipants(parts || []);
-        setPayments(pays || []);
+        setPayments(eligiblePayments);
       } catch (err) {
         console.error(err);
       }
     };
     load();
-  }, [activeEvent?.id]);
+  }, [activeEvent?.id, classes]);
 
-  // Generate Class-wise report data
-  const classReportRows: ClassReportRow[] = classes.map((cls) => {
+  // Generate Class-wise report data for active classes only
+  const classReportRows: ClassReportRow[] = activeClasses.map((cls) => {
     const classParticipants = participants.filter((p) => p.classId === cls.id);
     const classPayments = payments.filter((p) => p.classId === cls.id);
     const agg = calculateAggregateTotals(classParticipants, classPayments);
@@ -76,9 +82,9 @@ export const ReportsPage: React.FC = () => {
     };
   });
 
-  // Generate Year-wise report data (1st to 4th Year)
+  // Generate Year-wise report data (1st to 4th Year) strictly for active classes
   const yearStatsRows: YearWiseStatsModel[] = [1, 2, 3, 4].map((yr) =>
-    calculateYearWiseStats(yr, participants, payments, classes)
+    calculateYearWiseStats(yr, participants, payments, activeClasses)
   );
 
   const handleExportExcel = async () => {

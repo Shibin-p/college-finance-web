@@ -54,11 +54,13 @@ export const CentralReceiptsPage: React.FC = () => {
     loadReceipts();
   }, [activeEvent?.id, selectedClassId]);
 
+  const activeClasses = classes.filter((c) => c.active !== false);
+
   useEffect(() => {
-    if (classes.length > 0 && !classId) {
-      setClassId(classes[0].id);
+    if (activeClasses.length > 0 && !classId) {
+      setClassId(activeClasses[0].id);
     }
-  }, [classes]);
+  }, [activeClasses]);
 
   const handleSplitChange = (c: string, d: string, o: string) => {
     setCashAmount(c);
@@ -280,7 +282,7 @@ export const CentralReceiptsPage: React.FC = () => {
               onChange={(e) => setClassId(e.target.value)}
               className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-bold text-slate-100 focus:outline-none focus:border-emerald-500"
             >
-              {classes.map((cls) => (
+              {activeClasses.map((cls) => (
                 <option key={cls.id} value={cls.id}>
                   {cls.displayName} ({cls.department})
                 </option>

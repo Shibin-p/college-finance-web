@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useEvent } from "../../hooks/useEvent";
 import { usePermissions } from "../../hooks/usePermissions";
-import { fetchEventParticipants } from "../../services/studentService";
+import { fetchEffectiveEventParticipants } from "../../services/studentService";
 import { fetchPayments } from "../../services/paymentService";
 import { calculateYearWiseStats } from "../../utils/calculations";
 import type { EventParticipantModel, PaymentModel } from "../../types";
@@ -23,17 +23,23 @@ export const ViewerYearStats: React.FC = () => {
   const [payments, setPayments] = useState<PaymentModel[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const activeClasses = classes.filter((c) => c.active !== false);
+  const activeClassIds = new Set(activeClasses.map((c) => c.id));
+
   useEffect(() => {
     if (!activeEvent) return;
     const load = async () => {
       setLoading(true);
       try {
         const [parts, pays] = await Promise.all([
-          fetchEventParticipants(activeEvent.id),
+          fetchEffectiveEventParticipants(activeEvent, activeClasses),
           fetchPayments(activeEvent.id),
         ]);
+        const eligiblePayments = (pays || []).filter(
+          (p: PaymentModel) => !p.classId || activeClassIds.has(p.classId)
+        );
         setParticipants(parts || []);
-        setPayments(pays || []);
+        setPayments(eligiblePayments);
       } catch (err) {
         console.error(err);
       } finally {
@@ -41,11 +47,11 @@ export const ViewerYearStats: React.FC = () => {
       }
     };
     load();
-  }, [activeEvent?.id]);
+  }, [activeEvent?.id, classes]);
 
   const years = [1, 2, 3, 4];
   const yearStatsList = years.map((yr) =>
-    calculateYearWiseStats(yr, participants, payments, classes)
+    calculateYearWiseStats(yr, participants, payments, activeClasses)
   );
 
   if (!activeEvent && !loading) {

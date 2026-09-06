@@ -2,8 +2,8 @@ import {
   collection,
   doc,
   getDocs,
+  setDoc,
   addDoc,
-  updateDoc,
   serverTimestamp,
   query,
   where,
@@ -14,6 +14,8 @@ import { COLLECTIONS } from "../firebase/collections";
 import type {
   StudentModel,
   EventParticipantModel,
+  EventModel,
+  ClassModel,
   UserProfile,
   ParticipationStatus,
 } from "../types";
@@ -205,22 +207,112 @@ export async function ensureEventParticipantsForClass(
   return [...existing, ...newParticipants];
 }
 
+/**
+ * Single source of truth for active event collection calculations and participant resolution.
+ * - Reconciles all active students in active classes with any existing event overrides.
+ * - Automatically excludes inactive classes from active collection eligibility.
+ * - Requires no manual opening of collection ledgers.
+ */
+export async function fetchEffectiveEventParticipants(
+  event: EventModel,
+  activeClasses?: ClassModel[]
+): Promise<EventParticipantModel[]> {
+  try {
+    // 1. Fetch all active students in a single query
+    const studentsRef = collection(db, COLLECTIONS.STUDENTS);
+    const qStudents = query(studentsRef, where("active", "==", true));
+    const studentsSnap = await getDocs(qStudents);
+    const allStudents: StudentModel[] = [];
+    studentsSnap.forEach((d) => {
+      allStudents.push({ id: d.id, ...(d.data() as Omit<StudentModel, "id">) });
+    });
+
+    // 2. Resolve set of active class IDs
+    let activeClassIds: Set<string>;
+    if (activeClasses && activeClasses.length > 0) {
+      activeClassIds = new Set(
+        activeClasses.filter((c) => c.active !== false).map((c) => c.id)
+      );
+    } else {
+      const classesRef = collection(db, COLLECTIONS.CLASSES);
+      const classesSnap = await getDocs(classesRef);
+      activeClassIds = new Set();
+      classesSnap.forEach((d) => {
+        const cData = d.data();
+        if (cData.active !== false) {
+          activeClassIds.add(d.id);
+        }
+      });
+    }
+
+    // 3. Filter students to only those belonging to active classes
+    const eligibleStudents = allStudents.filter((s) => activeClassIds.has(s.classId));
+
+    // 4. Fetch any existing stored event participants for this event
+    const storedParticipants = await fetchEventParticipants(event.id);
+    const storedMap = new Map<string, EventParticipantModel>();
+    for (const p of storedParticipants) {
+      // Inactive classes are strictly excluded from current active calculations
+      if (activeClassIds.has(p.classId)) {
+        storedMap.set(p.studentId, p);
+      }
+    }
+
+    // 5. Build full reconciled participant list for all eligible students
+    const result: EventParticipantModel[] = [];
+    for (const student of eligibleStudents) {
+      if (storedMap.has(student.id)) {
+        result.push(storedMap.get(student.id)!);
+      } else {
+        result.push({
+          id: `ep_${event.id}_${student.id}`,
+          eventId: event.id,
+          studentId: student.id,
+          classId: student.classId,
+          participationStatus: "eligible",
+          requiredAmount: event.targetAmountEnabled ? (event.defaultTargetAmount || 0) : 0,
+          targetAmountEnabled: event.targetAmountEnabled,
+          exemption: false,
+          coordinatorWaiver: false,
+        });
+      }
+    }
+
+    return result;
+  } catch (error) {
+    console.error("Error fetching effective event participants:", error);
+    return [];
+  }
+}
+
 export async function setExemption(
   participantId: string,
   isExempted: boolean,
   reason: string,
-  user: UserProfile
+  user: UserProfile,
+  context?: Partial<EventParticipantModel>
 ): Promise<void> {
   const ref = doc(db, COLLECTIONS.EVENT_PARTICIPANTS, participantId);
   const status: ParticipationStatus = isExempted ? "exempted" : "eligible";
 
-  await updateDoc(ref, {
+  const data: Record<string, any> = {
     participationStatus: status,
     exemption: isExempted,
     exemptionReason: isExempted ? reason : "",
     exemptedBy: isExempted ? user.uid : null,
     exemptedAt: isExempted ? serverTimestamp() : null,
-  });
+    updatedAt: serverTimestamp(),
+  };
+
+  if (context) {
+    if (context.eventId) data.eventId = context.eventId;
+    if (context.studentId) data.studentId = context.studentId;
+    if (context.classId) data.classId = context.classId;
+    if (context.requiredAmount !== undefined) data.requiredAmount = context.requiredAmount;
+    if (context.targetAmountEnabled !== undefined) data.targetAmountEnabled = context.targetAmountEnabled;
+  }
+
+  await setDoc(ref, data, { merge: true });
 
   await logAudit({
     userId: user.uid,
@@ -228,6 +320,9 @@ export async function setExemption(
     userName: user.name,
     action: isExempted ? "create_exemption" : "remove_exemption",
     category: "exemption",
+    eventId: context?.eventId,
+    classId: context?.classId,
+    studentId: context?.studentId,
     description: isExempted
       ? `Exempted student (Participant ${participantId}). Reason: ${reason}`
       : `Removed exemption for student (Participant ${participantId})`,
@@ -238,16 +333,28 @@ export async function setCoordinatorWaiver(
   participantId: string,
   isWaived: boolean,
   waiverAmount: number,
-  user: UserProfile
+  user: UserProfile,
+  context?: Partial<EventParticipantModel>
 ): Promise<void> {
   const ref = doc(db, COLLECTIONS.EVENT_PARTICIPANTS, participantId);
 
-  await updateDoc(ref, {
+  const data: Record<string, any> = {
     coordinatorWaiver: isWaived,
     coordinatorWaiverAmount: isWaived ? waiverAmount : 0,
     coordinatorWaiverBy: isWaived ? user.uid : null,
     coordinatorWaiverAt: isWaived ? serverTimestamp() : null,
-  });
+    updatedAt: serverTimestamp(),
+  };
+
+  if (context) {
+    if (context.eventId) data.eventId = context.eventId;
+    if (context.studentId) data.studentId = context.studentId;
+    if (context.classId) data.classId = context.classId;
+    if (context.requiredAmount !== undefined) data.requiredAmount = context.requiredAmount;
+    if (context.targetAmountEnabled !== undefined) data.targetAmountEnabled = context.targetAmountEnabled;
+  }
+
+  await setDoc(ref, data, { merge: true });
 
   await logAudit({
     userId: user.uid,
@@ -255,6 +362,9 @@ export async function setCoordinatorWaiver(
     userName: user.name,
     action: isWaived ? "create_coordinator_waiver" : "remove_coordinator_waiver",
     category: "coordinator_waiver",
+    eventId: context?.eventId,
+    classId: context?.classId,
+    studentId: context?.studentId,
     amount: isWaived ? waiverAmount : 0,
     description: isWaived
       ? `Applied Coordinator Waiver of ₹${waiverAmount} to Participant ${participantId}`

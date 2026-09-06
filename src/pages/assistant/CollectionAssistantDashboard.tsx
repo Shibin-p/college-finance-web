@@ -12,12 +12,17 @@ import {
   approvePayment,
   declinePayment,
 } from "../../services/paymentService";
+import {
+  fetchCentralReceipts,
+  createCentralReceipt,
+} from "../../services/receiptService";
 import { calculateStudentFinancials, calculateAggregateTotals } from "../../utils/calculations";
 import type {
   StudentModel,
   EventParticipantModel,
   PaymentModel,
   PaymentMethod,
+  CentralReceiptModel,
 } from "../../types";
 import { Modal } from "../../components/common/Modal";
 import { StatusBadge } from "../../components/common/StatusBadge";
@@ -34,6 +39,7 @@ import {
   X,
   CheckSquare,
   Lock,
+  Receipt,
 } from "lucide-react";
 
 export const CollectionAssistantDashboard: React.FC = () => {
@@ -47,8 +53,21 @@ export const CollectionAssistantDashboard: React.FC = () => {
   const [participants, setParticipants] = useState<EventParticipantModel[]>([]);
   const [payments, setPayments] = useState<PaymentModel[]>([]);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<"pending" | "approvals">("pending");
+  const [tab, setTab] = useState<"pending" | "approvals" | "receipts">("pending");
   const [searchTerm, setSearchTerm] = useState("");
+
+  // Central Receipts state
+  const [centralReceipts, setCentralReceipts] = useState<CentralReceiptModel[]>([]);
+  const [receiptModalOpen, setReceiptModalOpen] = useState(false);
+  const [receiptClassId, setReceiptClassId] = useState("");
+  const [rcptCash, setRcptCash] = useState("0");
+  const [rcptDigital, setRcptDigital] = useState("0");
+  const [rcptOther, setRcptOther] = useState("0");
+  const [rcptTotal, setRcptTotal] = useState("0");
+  const [rcptDate, setRcptDate] = useState(new Date().toISOString().slice(0, 10));
+  const [rcptRemarks, setRcptRemarks] = useState("");
+  const [rcptLoading, setRcptLoading] = useState(false);
+  const [rcptError, setRcptError] = useState("");
 
   // Payment Modal
   const [paymentTarget, setPaymentTarget] = useState<{
@@ -68,9 +87,10 @@ export const CollectionAssistantDashboard: React.FC = () => {
   const [declineTarget, setDeclineTarget] = useState<PaymentModel | null>(null);
   const [declineReason, setDeclineReason] = useState("");
 
-  // Filter authorized classes strictly
-  const authorizedClasses = classes.filter((c) =>
-    crossClassAuthorizedClassIds.includes(c.id)
+  // Filter authorized classes strictly & exclude inactive classes
+  const activeClasses = classes.filter((c) => c.active !== false);
+  const authorizedClasses = activeClasses.filter(
+    (c) => crossClassAuthorizedClassIds.length === 0 || crossClassAuthorizedClassIds.includes(c.id)
   );
 
   useEffect(() => {
@@ -78,8 +98,85 @@ export const CollectionAssistantDashboard: React.FC = () => {
       if (!selectedClassId || !authorizedClasses.some((c) => c.id === selectedClassId)) {
         setSelectedClassId(authorizedClasses[0].id);
       }
+      if (!receiptClassId || !authorizedClasses.some((c) => c.id === receiptClassId)) {
+        setReceiptClassId(authorizedClasses[0].id);
+      }
     }
-  }, [crossClassAuthorizedClassIds, classes]);
+  }, [crossClassAuthorizedClassIds, activeClasses]);
+
+  const loadReceipts = async () => {
+    if (!activeEvent) return;
+    try {
+      const list = await fetchCentralReceipts(
+        activeEvent.id,
+        selectedClassId || undefined
+      );
+      setCentralReceipts(list);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleSplitChange = (c: string, d: string, o: string) => {
+    setRcptCash(c);
+    setRcptDigital(d);
+    setRcptOther(o);
+    const sum = (parseFloat(c) || 0) + (parseFloat(d) || 0) + (parseFloat(o) || 0);
+    setRcptTotal(String(sum));
+  };
+
+  const handleReceiptSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeEvent || !userProfile || !receiptClassId) return;
+    setRcptError("");
+    const numTotal = parseFloat(rcptTotal) || 0;
+    const numCash = parseFloat(rcptCash) || 0;
+    const numDigital = parseFloat(rcptDigital) || 0;
+    const numOther = parseFloat(rcptOther) || 0;
+
+    if (numTotal <= 0) {
+      setRcptError("Total amount must be greater than 0");
+      return;
+    }
+    if (numCash + numDigital + numOther !== numTotal) {
+      setRcptError("Sum of Cash + Digital + Other does not match Total Amount.");
+      return;
+    }
+
+    setRcptLoading(true);
+    try {
+      await createCentralReceipt(
+        {
+          eventId: activeEvent.id,
+          classId: receiptClassId,
+          totalAmount: numTotal,
+          cashAmount: numCash,
+          digitalAmount: numDigital,
+          otherAmount: numOther,
+          date: rcptDate,
+          remarks: rcptRemarks,
+          assignmentId: `${userProfile.uid}_${activeEvent.id}`,
+        },
+        userProfile,
+        "Cross-Class Collection Assistant"
+      );
+      setFeedback({
+        type: "success",
+        msg: `Successfully recorded Central Receipt of ₹${numTotal}.`,
+      });
+      setReceiptModalOpen(false);
+      setRcptCash("0");
+      setRcptDigital("0");
+      setRcptOther("0");
+      setRcptTotal("0");
+      setRcptRemarks("");
+      await loadReceipts();
+    } catch (err: any) {
+      setRcptError(err.message || "Failed to record central receipt.");
+    } finally {
+      setRcptLoading(false);
+    }
+  };
 
   const loadData = async () => {
     if (!activeEvent || !selectedClassId) return;
@@ -344,6 +441,24 @@ export const CollectionAssistantDashboard: React.FC = () => {
             <span>Pending Approvals ({pendingPayments.length})</span>
           </button>
         )}
+
+        {crossClassCapabilities.canAccessCentralReceipts && (
+          <button
+            type="button"
+            onClick={() => {
+              setTab("receipts");
+              loadReceipts();
+            }}
+            className={`pb-2.5 px-4 text-xs font-bold transition-all border-b-2 cursor-pointer flex items-center gap-1.5 ${
+              tab === "receipts"
+                ? "border-teal-400 text-teal-300"
+                : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <Receipt className="w-3.5 h-3.5" />
+            <span>Central Receipts ({centralReceipts.length})</span>
+          </button>
+        )}
       </div>
 
       {/* TAB 1: Pending Students Roster */}
@@ -551,6 +666,88 @@ export const CollectionAssistantDashboard: React.FC = () => {
         </div>
       )}
 
+      {/* TAB 3: Central Receipts Register */}
+      {tab === "receipts" && (
+        <div className="glass-panel rounded-3xl border border-slate-800 overflow-hidden space-y-4">
+          <div className="p-4 border-b border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-teal-400" />
+                <span>Central Handover Receipts ({centralReceipts.length})</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Record physical cash, UPI, and other collections deposited into central custody for your authorized classes.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setReceiptModalOpen(true)}
+              className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-teal-600/25 transition-all flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Record Central Receipt</span>
+            </button>
+          </div>
+
+          {centralReceipts.length === 0 ? (
+            <div className="p-8">
+              <EmptyState
+                icon={Receipt}
+                title="No Central Receipts"
+                description="No central handover receipts have been recorded for this class yet."
+              />
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-900/80 text-slate-400 font-semibold border-b border-slate-800">
+                  <tr>
+                    <th className="py-3 px-4">Date & Time</th>
+                    <th className="py-3 px-4 font-mono">Cash</th>
+                    <th className="py-3 px-4 font-mono">Digital</th>
+                    <th className="py-3 px-4 font-mono">Other</th>
+                    <th className="py-3 px-4 font-mono">Total Amount</th>
+                    <th className="py-3 px-4">Received By</th>
+                    <th className="py-3 px-4">Remarks</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {centralReceipts.map((r) => (
+                    <tr key={r.id} className="hover:bg-slate-800/30 transition-colors">
+                      <td className="py-3 px-4 text-slate-300 font-mono">
+                        {r.date} {r.time || ""}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-emerald-400">
+                        {formatINR(r.cashAmount || 0)}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-teal-400">
+                        {formatINR(r.digitalAmount || 0)}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-slate-400">
+                        {formatINR(r.otherAmount || 0)}
+                      </td>
+                      <td className="py-3 px-4 font-mono font-bold text-slate-100">
+                        {formatINR(r.totalAmount || 0)}
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="font-semibold text-slate-200">{r.receivedByName || "Coordinator"}</div>
+                        <div className="text-[10px] text-teal-400 font-mono">
+                          {r.receivedByRole || "Cross-Class Collection Assistant"}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-slate-400 italic">
+                        {r.remarks || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Collect Payment Modal */}
       {paymentTarget && (
         <Modal
@@ -700,6 +897,147 @@ export const CollectionAssistantDashboard: React.FC = () => {
               </button>
             </div>
           </div>
+        </Modal>
+      )}
+
+      {/* Central Receipt Modal */}
+      {receiptModalOpen && (
+        <Modal
+          isOpen={receiptModalOpen}
+          onClose={() => setReceiptModalOpen(false)}
+          title="Record Central Custody Receipt"
+          subtitle="Deposit cash or digital collections into central event accounting"
+          maxWidth="md"
+        >
+          <form onSubmit={handleReceiptSubmit} className="space-y-4">
+            {rcptError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs font-semibold">
+                {rcptError}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
+                Authorized Class *
+              </label>
+              <select
+                value={receiptClassId}
+                onChange={(e) => setReceiptClassId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-bold text-slate-100 focus:outline-none focus:border-teal-500 cursor-pointer"
+              >
+                {authorizedClasses.map((cls) => (
+                  <option key={cls.id} value={cls.id}>
+                    {cls.displayName} ({cls.department})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1 uppercase">
+                  Cash (₹)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={rcptCash}
+                  onChange={(e) => handleSplitChange(e.target.value, rcptDigital, rcptOther)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono text-emerald-400 focus:outline-none focus:border-teal-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1 uppercase">
+                  Digital (₹)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={rcptDigital}
+                  onChange={(e) => handleSplitChange(rcptCash, e.target.value, rcptOther)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono text-teal-400 focus:outline-none focus:border-teal-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1 uppercase">
+                  Other (₹)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={rcptOther}
+                  onChange={(e) => handleSplitChange(rcptCash, rcptDigital, e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono text-slate-300 focus:outline-none focus:border-teal-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-300 uppercase">
+                  Total Amount (₹) *
+                </label>
+                <span className="text-[11px] text-slate-400 font-mono">
+                  Sum: {formatINR(parseFloat(rcptTotal) || 0)}
+                </span>
+              </div>
+              <input
+                type="number"
+                required
+                min="1"
+                step="any"
+                value={rcptTotal}
+                onChange={(e) => setRcptTotal(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-sm font-mono font-bold text-teal-400 focus:outline-none focus:border-teal-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
+                Handover Date *
+              </label>
+              <input
+                type="date"
+                required
+                value={rcptDate}
+                onChange={(e) => setRcptDate(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-teal-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
+                Handover Remarks / Notes
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Deposited Day 1 collection cash to Super Coordinator"
+                value={rcptRemarks}
+                onChange={(e) => setRcptRemarks(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-teal-500"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setReceiptModalOpen(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-400 bg-slate-800 rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={rcptLoading}
+                className="px-4 py-2 text-xs font-semibold text-white bg-teal-600 hover:bg-teal-500 rounded-xl flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {rcptLoading ? "Recording..." : "Record Receipt"}
+              </button>
+            </div>
+          </form>
         </Modal>
       )}
     </div>

@@ -3,8 +3,8 @@ import {
   doc,
   getDocs,
   getDoc,
+  setDoc,
   updateDoc,
-  addDoc,
   serverTimestamp,
   query,
   where,
@@ -141,6 +141,7 @@ export async function createCoordinatorAssignment(
         canAddPayment: false,
         canAddInstallment: false,
         canHandlePendingApprovals: false,
+        canAccessCentralReceipts: false,
       },
     },
     assignedBy: currentUser.uid,
@@ -149,7 +150,9 @@ export async function createCoordinatorAssignment(
     updatedAt: now,
   };
 
-  const docRef = await addDoc(ref, data);
+  const deterministicId = `${params.userId}_${params.eventId}`;
+  const docRef = doc(ref, deterministicId);
+  await setDoc(docRef, data, { merge: true });
 
   await logAudit({
     userId: currentUser.uid,
@@ -160,11 +163,11 @@ export async function createCoordinatorAssignment(
     eventId: params.eventId,
     classId: params.classId,
     description: `Assigned user ${params.userId} (${params.assignmentType || "coordinator"}) in event ${params.eventId}`,
-    metadata: { assignmentId: docRef.id, params },
+    metadata: { assignmentId: deterministicId, params },
   });
 
   return {
-    id: docRef.id,
+    id: deterministicId,
     ...data,
   } as CoordinatorAssignmentModel;
 }
@@ -178,11 +181,24 @@ export async function updateCoordinatorAssignment(
   const snap = await getDoc(ref);
   const oldData = snap.data();
 
-  await updateDoc(ref, {
+  const updatePayload = {
     ...updates,
     updatedAt: serverTimestamp(),
     updatedBy: currentUser.uid,
-  });
+  };
+
+  await updateDoc(ref, updatePayload);
+
+  // If existing document has a non-deterministic ID, mirror to deterministic ID for Firestore Security Rules
+  const targetUserId = updates.userId || oldData?.userId;
+  const targetEventId = updates.eventId || oldData?.eventId;
+  if (targetUserId && targetEventId) {
+    const deterministicId = `${targetUserId}_${targetEventId}`;
+    if (id !== deterministicId) {
+      const deterministicRef = doc(db, COLLECTIONS.COORDINATOR_ASSIGNMENTS, deterministicId);
+      await setDoc(deterministicRef, { ...oldData, ...updatePayload }, { merge: true });
+    }
+  }
 
   await logAudit({
     userId: currentUser.uid,

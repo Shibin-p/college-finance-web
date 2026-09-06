@@ -138,6 +138,7 @@ export interface CentralReceiptModel {
   time?: string;
   receivedBy: string;
   receivedByName?: string;
+  receivedByRole?: string;
   remarks?: string;
   createdAt?: any;
   updatedAt?: any;
@@ -270,6 +271,7 @@ export interface CrossClassCapabilities {
   canAddPayment: boolean;
   canAddInstallment: boolean;
   canHandlePendingApprovals: boolean;
+  canAccessCentralReceipts?: boolean;
 }
 
 export interface CoordinatorAssignmentModel {
