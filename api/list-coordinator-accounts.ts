@@ -41,26 +41,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ success: false, error: "Method Not Allowed. Use GET." });
   }
 
+  let currentStep = "STEP 1: Admin initialization";
   try {
-    // 1. Authenticate caller as active Super Coordinator
+    // STEP 1: Admin initialization & STEP 2/3: Caller Verification
+    console.log("[coordinator-api] STEP 1: admin-init & caller verification: START");
     await verifySuperCoordinatorCaller(req);
+    console.log("[coordinator-api] STEP 1-3: caller verification: OK");
 
+    currentStep = "STEP 4: Firebase Auth listUsers()";
+    console.log("[coordinator-api] STEP 4: list-users: START");
     const eventId = typeof req.query.eventId === "string" ? req.query.eventId.trim() : undefined;
 
     const auth = getAdminAuth();
     const firestore = getAdminFirestore();
 
-    // 2. Retrieve all Firebase Authentication users (handle pagination)
+    // Retrieve all Firebase Authentication users (handle pagination)
     const allAuthUsers: UserRecord[] = [];
     let nextPageToken: string | undefined = undefined;
+    let pageCount = 0;
 
     do {
+      pageCount++;
       const pageResult = await auth.listUsers(1000, nextPageToken);
       allAuthUsers.push(...pageResult.users);
       nextPageToken = pageResult.pageToken;
+      console.log(`[coordinator-api] STEP 4: list-users page ${pageCount}: retrieved ${pageResult.users.length} users (total so far: ${allAuthUsers.length})`);
     } while (nextPageToken);
 
-    // 3. Retrieve Firestore profiles and event assignments in parallel
+    console.log(`[coordinator-api] STEP 4: list-users: OK (${allAuthUsers.length} total users retrieved)`);
+
+    // STEP 5: Firestore profile/assignment lookup
+    currentStep = "STEP 5: Firestore profile/assignment lookup";
+    console.log("[coordinator-api] STEP 5: firestore-enrichment: START");
     const userDocsPromise = firestore.collection("users").get();
     const classesDocsPromise = firestore.collection("classes").get();
     const assignmentsPromise = eventId
@@ -97,7 +109,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // 4. Transform and enrich each account with Firestore status
+    // Transform and enrich each account with Firestore status
     const accounts: CoordinatorAccountItem[] = allAuthUsers
       .filter((u) => Boolean(u.email)) // Keep only accounts with an email
       .map((u) => {
@@ -134,9 +146,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         };
       });
 
-    // 5. Sort accounts alphabetically by email
+    // Sort accounts alphabetically by email
     accounts.sort((a, b) => a.email.localeCompare(b.email, undefined, { sensitivity: "base" }));
+    console.log(`[coordinator-api] STEP 5: firestore-enrichment: OK (${accounts.length} coordinator accounts ready)`);
 
+    // STEP 6: JSON response
+    currentStep = "STEP 6: JSON response";
+    console.log(`[coordinator-api] STEP 6: json-response: SENDING 200 OK (${accounts.length} accounts)`);
     return res.status(200).json({
       success: true,
       totalCount: accounts.length,
@@ -144,9 +160,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (error: any) {
     const statusCode = error.statusCode || 500;
-    console.error("[list-coordinator-accounts] Error:", error.message || error);
+    console.error(`[coordinator-api] ${currentStep}: FAILED -`, error.message || error);
     return res.status(statusCode).json({
       success: false,
+      failedStep: currentStep,
       error: error.message || "Failed to list coordinator accounts.",
     });
   }

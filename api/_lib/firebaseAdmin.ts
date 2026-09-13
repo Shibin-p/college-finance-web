@@ -22,9 +22,35 @@ export function getFirebaseAdminApp(): App {
     return existingApps[0];
   }
 
-  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID;
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY;
+
+  const projectIdPresent = Boolean(projectId);
+  const clientEmailPresent = Boolean(clientEmail);
+  const privateKeyPresent = Boolean(rawPrivateKey);
+
+  let keyBeginsCorrectly = false;
+  let keyEndsCorrectly = false;
+  if (rawPrivateKey) {
+    let pk = rawPrivateKey.trim();
+    if ((pk.startsWith('"') && pk.endsWith('"')) || (pk.startsWith("'") && pk.endsWith("'"))) {
+      pk = pk.slice(1, -1).trim();
+    }
+    keyBeginsCorrectly = pk.startsWith("-----BEGIN PRIVATE KEY-----");
+    keyEndsCorrectly =
+      pk.endsWith("-----END PRIVATE KEY-----") ||
+      pk.endsWith("-----END PRIVATE KEY-----\\n") ||
+      pk.endsWith("-----END PRIVATE KEY-----\n");
+  }
+
+  console.log(
+    `[coordinator-api] env-check: FIREBASE_PROJECT_ID=${
+      projectIdPresent ? (projectId === "college-finance-web" ? "OK(college-finance-web)" : `PRESENT(${projectId})`) : "MISSING"
+    }, FIREBASE_CLIENT_EMAIL=${clientEmailPresent ? "PRESENT" : "MISSING"}, FIREBASE_PRIVATE_KEY=${
+      privateKeyPresent ? "PRESENT" : "MISSING"
+    }, keyBegins=${keyBeginsCorrectly}, keyEnds=${keyEndsCorrectly}`
+  );
 
   if (!projectId || !clientEmail || !rawPrivateKey) {
     const missing: string[] = [];
@@ -38,6 +64,7 @@ export function getFirebaseAdminApp(): App {
       )}. Please configure them in your Vercel Project Settings under Environment Variables.`
     );
     (err as any).statusCode = 500;
+    console.error(`[coordinator-api] admin-init: FAILED - ${err.message}`);
     throw err;
   }
 
@@ -53,20 +80,23 @@ export function getFirebaseAdminApp(): App {
     privateKey = privateKey.slice(1, -1).trim();
   }
 
-  // 3. Replace escaped \n and strip \r
+  // 3. Replace literal escaped \n and strip \r
   privateKey = privateKey.replace(/\\n/g, "\n").replace(/\\r/g, "");
 
   try {
-    return initializeApp({
+    const app = initializeApp({
       credential: cert({
         projectId,
         clientEmail,
         privateKey,
       }),
     });
+    console.log("[coordinator-api] admin-init: OK");
+    return app;
   } catch (initError: any) {
     const appsAfterCatch = getApps();
     if (appsAfterCatch.length > 0 && appsAfterCatch[0]) {
+      console.log("[coordinator-api] admin-init: OK (app already existed)");
       return appsAfterCatch[0];
     }
     const err = new Error(
@@ -75,6 +105,7 @@ export function getFirebaseAdminApp(): App {
       })`
     );
     (err as any).statusCode = 500;
+    console.error(`[coordinator-api] admin-init: FAILED - ${err.message}`);
     throw err;
   }
 }
@@ -100,6 +131,7 @@ export async function verifySuperCoordinatorCaller(
     (req.headers.Authorization as string | undefined);
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    console.error("[coordinator-api] token-verification: FAILED - Missing or invalid Authorization header");
     const err = new Error("Unauthenticated: Missing or invalid Authorization header. Expected Bearer token.");
     (err as any).statusCode = 401;
     throw err;
@@ -107,27 +139,41 @@ export async function verifySuperCoordinatorCaller(
 
   const idToken = authHeader.split(" ")[1]?.trim();
   if (!idToken) {
+    console.error("[coordinator-api] token-verification: FAILED - Empty Bearer token provided");
     const err = new Error("Unauthenticated: Empty Bearer token provided.");
     (err as any).statusCode = 401;
     throw err;
   }
 
+  console.log("[coordinator-api] token-verification: START");
   const auth = getAdminAuth();
   const firestore = getAdminFirestore();
 
   let decodedToken: DecodedIdToken;
   try {
     decodedToken = await auth.verifyIdToken(idToken);
+    console.log(`[coordinator-api] token-verification: OK (callerUid: ${decodedToken.uid.slice(0, 6)}...)`);
   } catch (verifyError: any) {
+    console.error("[coordinator-api] token-verification: FAILED -", verifyError.message || verifyError);
     const err = new Error(`Unauthenticated: Invalid or expired ID token (${verifyError.message || "token verification failed"}). Please refresh and sign in again.`);
     (err as any).statusCode = 401;
     throw err;
   }
 
+  console.log("[coordinator-api] caller-profile: START");
   const callerUid = decodedToken.uid;
-  const userDoc = await firestore.collection("users").doc(callerUid).get();
+  let userDoc;
+  try {
+    userDoc = await firestore.collection("users").doc(callerUid).get();
+  } catch (fsError: any) {
+    console.error("[coordinator-api] caller-profile: FAILED (Firestore read error) -", fsError.message || fsError);
+    const err = new Error(`Database read error: Failed to fetch caller profile (${fsError.message || fsError})`);
+    (err as any).statusCode = 500;
+    throw err;
+  }
 
   if (!userDoc.exists) {
+    console.error(`[coordinator-api] caller-profile: FAILED - User document users/${callerUid.slice(0, 6)} does not exist`);
     const err = new Error("Access Denied: Caller account does not exist in the system database.");
     (err as any).statusCode = 403;
     throw err;
@@ -140,11 +186,13 @@ export async function verifySuperCoordinatorCaller(
     userData.active === false ||
     userData.loginEnabled === false
   ) {
+    console.error(`[coordinator-api] caller-profile: FAILED - Caller is not an active super_coordinator (role: ${userData?.role}, active: ${userData?.active})`);
     const err = new Error("Access Denied: Privileged operation. Only active Super Coordinators are authorized.");
     (err as any).statusCode = 403;
     throw err;
   }
 
+  console.log(`[coordinator-api] caller-profile: OK (role: ${userData.role})`);
   return {
     uid: callerUid,
     email: decodedToken.email || userData.email,

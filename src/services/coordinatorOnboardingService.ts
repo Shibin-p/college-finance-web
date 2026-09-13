@@ -98,35 +98,59 @@ async function getAuthToken(): Promise<string> {
  * Helper to safely parse API responses with user-friendly error diagnostics for Vercel.
  */
 async function parseApiResponse(response: Response, endpointName: string): Promise<any> {
-  const contentType = response.headers.get("content-type") || "";
-
-  if (!contentType.includes("application/json")) {
-    if (response.status === 404) {
-      throw new Error(
-        `API endpoint ${endpointName} was not found (404). Please ensure the latest project commit with the /api directory is deployed on Vercel.`
-      );
-    }
-    if (response.status >= 500) {
-      throw new Error(
-        `Server configuration error (${response.status}) from ${endpointName}. Please ensure FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY environment variables are configured in your Vercel Project Settings.`
-      );
-    }
-    throw new Error(`Server returned non-JSON response (${response.status} ${response.statusText}).`);
-  }
-
-  let data: any;
+  let rawBody = "";
   try {
-    data = await response.json();
-  } catch (jsonErr: any) {
-    throw new Error(`Failed to parse JSON response from ${endpointName}.`, { cause: jsonErr });
+    rawBody = await response.text();
+  } catch (readErr: any) {
+    console.warn(`[coordinatorOnboardingService] Failed to read response body:`, readErr);
   }
 
-  if (!response.ok || data?.success === false) {
-    const errorMsg = data?.error || `Request to ${endpointName} failed (${response.status} ${response.statusText})`;
-    throw new Error(errorMsg);
+  // Attempt JSON parse regardless of exact content-type header
+  let data: any = null;
+  if (rawBody) {
+    try {
+      data = JSON.parse(rawBody);
+    } catch {
+      // not json
+    }
   }
 
-  return data;
+  if (data) {
+    if (!response.ok || data.success === false) {
+      const stepInfo = data.failedStep ? ` [at ${data.failedStep}]` : "";
+      const errorMsg = data.error || `Request to ${endpointName} failed with status ${response.status}`;
+      throw new Error(`${errorMsg}${stepInfo}`);
+    }
+    return data;
+  }
+
+  if (response.status === 404) {
+    throw new Error(
+      `API endpoint ${endpointName} was not found (404). Please ensure the latest project commit with the /api directory is deployed on Vercel.`
+    );
+  }
+
+  // Extract snippet from non-JSON HTML/text body if present
+  let bodySnippet = "";
+  if (rawBody) {
+    const match =
+      rawBody.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i) ||
+      rawBody.match(/<code[^>]*>([\s\S]*?)<\/code>/i) ||
+      rawBody.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    bodySnippet = match
+      ? match[1].replace(/<[^>]+>/g, " ").trim().slice(0, 200)
+      : rawBody.replace(/<[^>]+>/g, " ").trim().slice(0, 200);
+  }
+
+  if (response.status >= 500) {
+    throw new Error(
+      `Server runtime error (${response.status}) from ${endpointName}${
+        bodySnippet ? `: ${bodySnippet}` : ""
+      }. Please check Vercel function runtime logs.`
+    );
+  }
+
+  throw new Error(`Server returned HTTP ${response.status} (${response.statusText})${bodySnippet ? `: ${bodySnippet}` : ""}`);
 }
 
 /**

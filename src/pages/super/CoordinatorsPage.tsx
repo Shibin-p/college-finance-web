@@ -1321,8 +1321,10 @@ export const CoordinatorsPage: React.FC = () => {
                 <div>
                   <div className="text-xs font-bold flex items-center gap-1.5 text-slate-100">
                     <span>Select Existing Firebase Account</span>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold">
-                      50+ Accounts
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold">
+                      {accountsLoading
+                        ? "Loading accounts..."
+                        : `${authAccounts.length} Accounts`}
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
@@ -1366,7 +1368,7 @@ export const CoordinatorsPage: React.FC = () => {
               <div className="flex items-center justify-between gap-2">
                 <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
                   <Users className="w-4 h-4 text-emerald-400" />
-                  <span>Existing Firebase Authentication Accounts ({authAccounts.length})</span>
+                  <span>Existing Firebase Authentication Accounts ({accountsLoading ? "Loading..." : `${authAccounts.length}`})</span>
                 </label>
                 <button
                   type="button"
