@@ -14,7 +14,7 @@ export interface CallerInfo {
  * Uses Vercel server-side environment variables:
  * - FIREBASE_PROJECT_ID
  * - FIREBASE_CLIENT_EMAIL
- * - FIREBASE_PRIVATE_KEY (with newline formatting support)
+ * - FIREBASE_PRIVATE_KEY (with robust quotes, \n, and \r formatting support)
  */
 export function getFirebaseAdminApp(): App {
   const existingApps = getApps();
@@ -27,16 +27,34 @@ export function getFirebaseAdminApp(): App {
   const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY;
 
   if (!projectId || !clientEmail || !rawPrivateKey) {
-    throw new Error(
-      "Server Configuration Error: Missing Firebase Admin environment variables on Vercel. " +
-        "Please ensure FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY are set."
+    const missing: string[] = [];
+    if (!projectId) missing.push("FIREBASE_PROJECT_ID");
+    if (!clientEmail) missing.push("FIREBASE_CLIENT_EMAIL");
+    if (!rawPrivateKey) missing.push("FIREBASE_PRIVATE_KEY");
+
+    const err = new Error(
+      `Server Configuration Error: Missing Firebase Admin environment variable(s) on Vercel: ${missing.join(
+        ", "
+      )}. Please configure them in your Vercel Project Settings under Environment Variables.`
     );
+    (err as any).statusCode = 500;
+    throw err;
   }
 
-  // Properly handle literal \n characters commonly saved in Vercel environment variables
-  const privateKey = rawPrivateKey.includes("\\n")
-    ? rawPrivateKey.replace(/\\n/g, "\n")
-    : rawPrivateKey;
+  // Robust private key formatting:
+  // 1. Trim surrounding whitespace
+  let privateKey = rawPrivateKey.trim();
+
+  // 2. Strip surrounding wrapping quotes if accidentally entered in Vercel UI
+  if (
+    (privateKey.startsWith('"') && privateKey.endsWith('"')) ||
+    (privateKey.startsWith("'") && privateKey.endsWith("'"))
+  ) {
+    privateKey = privateKey.slice(1, -1).trim();
+  }
+
+  // 3. Replace escaped \n and strip \r
+  privateKey = privateKey.replace(/\\n/g, "\n").replace(/\\r/g, "");
 
   try {
     return initializeApp({
@@ -51,7 +69,13 @@ export function getFirebaseAdminApp(): App {
     if (appsAfterCatch.length > 0 && appsAfterCatch[0]) {
       return appsAfterCatch[0];
     }
-    throw initError;
+    const err = new Error(
+      `Firebase Admin Initialization Error: Failed to parse credentials. Please check FIREBASE_PRIVATE_KEY formatting in Vercel Settings. (${
+        initError.message || initError
+      })`
+    );
+    (err as any).statusCode = 500;
+    throw err;
   }
 }
 
@@ -95,7 +119,7 @@ export async function verifySuperCoordinatorCaller(
   try {
     decodedToken = await auth.verifyIdToken(idToken);
   } catch (verifyError: any) {
-    const err = new Error(`Unauthenticated: Invalid or expired ID token (${verifyError.message || "token verification failed"}).`);
+    const err = new Error(`Unauthenticated: Invalid or expired ID token (${verifyError.message || "token verification failed"}). Please refresh and sign in again.`);
     (err as any).statusCode = 401;
     throw err;
   }

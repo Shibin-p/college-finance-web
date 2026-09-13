@@ -33,11 +33,13 @@ import {
   RefreshCw,
   Lock,
   Unlock,
+  Users,
+  Check,
 } from "lucide-react";
 import {
-  checkCoordinatorAccount,
+  listCoordinatorAccounts,
   onboardCoordinatorAccount,
-  type CheckCoordinatorResult,
+  type CoordinatorAccountItem,
 } from "../../services/coordinatorOnboardingService";
 
 export const CoordinatorsPage: React.FC = () => {
@@ -50,6 +52,16 @@ export const CoordinatorsPage: React.FC = () => {
 
   // Add Coordinator Modal State
   const [addModalOpen, setAddModalOpen] = useState(false);
+  const [onboardMode, setOnboardMode] = useState<"existing" | "new">("existing");
+
+  // Existing Accounts List & Search
+  const [authAccounts, setAuthAccounts] = useState<CoordinatorAccountItem[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountsError, setAccountsError] = useState("");
+  const [accountSearch, setAccountSearch] = useState("");
+  const [selectedAccount, setSelectedAccount] = useState<CoordinatorAccountItem | null>(null);
+  const [accountFilter, setAccountFilter] = useState<"all" | "unconfigured" | "configured">("all");
+
   const [addEmail, setAddEmail] = useState("");
   const [addName, setAddName] = useState("");
   const [addPassword, setAddPassword] = useState("");
@@ -87,11 +99,6 @@ export const CoordinatorsPage: React.FC = () => {
     canHandlePendingApprovals: false,
     canAccessCentralReceipts: false,
   });
-
-  // Detection / Verification State
-  const [checkLoading, setCheckLoading] = useState(false);
-  const [checkResult, setCheckResult] = useState<CheckCoordinatorResult | null>(null);
-  const [checkError, setCheckError] = useState("");
 
   const [addOnboardLoading, setAddOnboardLoading] = useState(false);
   const [addOnboardError, setAddOnboardError] = useState("");
@@ -324,7 +331,44 @@ export const CoordinatorsPage: React.FC = () => {
     }
   };
 
+  const loadAuthAccounts = async () => {
+    if (!activeEvent) return;
+    setAccountsLoading(true);
+    setAccountsError("");
+    try {
+      const list = await listCoordinatorAccounts(activeEvent.id);
+      setAuthAccounts(list);
+    } catch (err: any) {
+      console.error("Failed to load coordinator accounts:", err);
+      setAccountsError(err.message || "Failed to load Firebase Authentication accounts.");
+    } finally {
+      setAccountsLoading(false);
+    }
+  };
+
+  const handleSelectAccount = (acc: CoordinatorAccountItem) => {
+    setSelectedAccount(acc);
+    setAddEmail(acc.email);
+    setAddName(acc.displayName || acc.firestoreName || acc.email.split("@")[0]);
+    if (acc.firestoreRole === "class_coordinator" || acc.firestoreRole === "view_coordinator") {
+      setAddRole(acc.firestoreRole);
+    }
+    if (acc.assignedClassId) {
+      setAddClassId(acc.assignedClassId);
+    }
+    if (acc.viewerScope) {
+      setAddViewerScope(acc.viewerScope as ViewerScope);
+    }
+    if (acc.crossClassEnabled) {
+      setAddCrossClassEnabled(true);
+    }
+  };
+
   const openAddCoordinatorModal = () => {
+    setOnboardMode("existing");
+    setSelectedAccount(null);
+    setAccountSearch("");
+    setAccountFilter("all");
     setAddEmail("");
     setAddName("");
     setAddPassword("");
@@ -358,39 +402,10 @@ export const CoordinatorsPage: React.FC = () => {
       canHandlePendingApprovals: false,
       canAccessCentralReceipts: false,
     });
-    setCheckResult(null);
-    setCheckError("");
     setAddOnboardError("");
     setAddOnboardSuccess("");
     setAddModalOpen(true);
-  };
-
-  const handleCheckEmail = async () => {
-    if (!addEmail.trim()) {
-      setCheckError("Please enter an email address to verify.");
-      return;
-    }
-    setCheckLoading(true);
-    setCheckError("");
-    try {
-      const result = await checkCoordinatorAccount(addEmail.trim(), activeEvent?.id);
-      setCheckResult(result);
-      if (result.exists) {
-        if (result.displayName && !addName.trim()) {
-          setAddName(result.displayName);
-        } else if (result.firestoreUser?.name && !addName.trim()) {
-          setAddName(result.firestoreUser.name);
-        }
-        if (result.firestoreUser?.role && (result.firestoreUser.role === "class_coordinator" || result.firestoreUser.role === "view_coordinator")) {
-          setAddRole(result.firestoreUser.role);
-        }
-      }
-    } catch (err: any) {
-      setCheckError(err.message || "Failed to check account via server API.");
-      setCheckResult(null);
-    } finally {
-      setCheckLoading(false);
-    }
+    loadAuthAccounts();
   };
 
   const handleOnboardSubmit = async (e: React.FormEvent) => {
@@ -399,19 +414,26 @@ export const CoordinatorsPage: React.FC = () => {
     setAddOnboardError("");
     setAddOnboardSuccess("");
 
-    if (!addEmail.trim()) {
-      setAddOnboardError("Email address is required.");
-      return;
-    }
-    if (!addName.trim()) {
-      setAddOnboardError("Coordinator full name is required.");
-      return;
-    }
-
-    const isNewUser = checkResult ? !checkResult.exists : false;
-    if (isNewUser) {
+    if (onboardMode === "existing") {
+      if (!selectedAccount) {
+        setAddOnboardError("Please select an existing Firebase Authentication account from the list.");
+        return;
+      }
+      if (!addName.trim()) {
+        setAddOnboardError("Coordinator name is required.");
+        return;
+      }
+    } else {
+      if (!addEmail.trim()) {
+        setAddOnboardError("Email address is required.");
+        return;
+      }
       if (!addPassword || addPassword.length < 6) {
         setAddOnboardError("Password must be at least 6 characters for new accounts.");
+        return;
+      }
+      if (!addName.trim()) {
+        setAddOnboardError("Coordinator full name is required.");
         return;
       }
     }
@@ -429,9 +451,9 @@ export const CoordinatorsPage: React.FC = () => {
     setAddOnboardLoading(true);
     try {
       const res = await onboardCoordinatorAccount({
-        email: addEmail.trim(),
+        email: onboardMode === "existing" && selectedAccount ? selectedAccount.email : addEmail.trim(),
         name: addName.trim(),
-        password: isNewUser ? addPassword : undefined,
+        password: onboardMode === "new" ? addPassword : undefined,
         role: addRole,
         accountActive: addAccountActive,
         loginEnabled: addLoginEnabled,
@@ -446,10 +468,12 @@ export const CoordinatorsPage: React.FC = () => {
           authorizedClassIds: addAuthorizedClassIds,
           capabilities: addCrossClassCaps,
         },
+        existingUid: onboardMode === "existing" && selectedAccount ? selectedAccount.uid : undefined,
       });
 
       setAddOnboardSuccess(res.message);
       await loadData();
+      loadAuthAccounts();
       setTimeout(() => {
         setAddModalOpen(false);
       }, 1500);
@@ -467,6 +491,26 @@ export const CoordinatorsPage: React.FC = () => {
       setAddAuthorizedClassIds([...addAuthorizedClassIds, clsId]);
     }
   };
+
+  const filteredAccounts = authAccounts.filter((acc) => {
+    const query = accountSearch.toLowerCase().trim();
+    const matchQuery =
+      !query ||
+      acc.email.toLowerCase().includes(query) ||
+      (acc.displayName && acc.displayName.toLowerCase().includes(query)) ||
+      (acc.firestoreName && acc.firestoreName.toLowerCase().includes(query)) ||
+      (acc.assignedClassName && acc.assignedClassName.toLowerCase().includes(query));
+
+    if (!matchQuery) return false;
+
+    if (accountFilter === "unconfigured") {
+      return !acc.hasFirestoreProfile || !acc.hasEventAssignment;
+    }
+    if (accountFilter === "configured") {
+      return acc.hasFirestoreProfile && acc.hasEventAssignment;
+    }
+    return true;
+  });
 
   return (
     <div className="space-y-6">
@@ -1249,96 +1293,299 @@ export const CoordinatorsPage: React.FC = () => {
             </div>
           )}
 
-          {/* Section 1: Email & Account Verification */}
-          <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3">
+          {/* Top Options: Option A (Select Existing) vs Option B (Create New) */}
+          <div className="space-y-2">
             <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
-              1. Coordinator Email & Account Detection
+              How would you like to add the coordinator?
             </label>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <div className="relative flex-1">
-                <input
-                  type="email"
-                  required
-                  placeholder="coordinator@college.edu"
-                  value={addEmail}
-                  onChange={(e) => {
-                    setAddEmail(e.target.value);
-                    if (checkResult) setCheckResult(null);
-                  }}
-                  onBlur={() => {
-                    if (addEmail.trim() && !checkResult && !checkLoading) {
-                      handleCheckEmail();
-                    }
-                  }}
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs font-mono text-slate-100 placeholder-slate-500 focus:outline-none focus:border-teal-500"
-                />
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={handleCheckEmail}
-                disabled={checkLoading || !addEmail.trim()}
-                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+                onClick={() => {
+                  setOnboardMode("existing");
+                  setAddOnboardError("");
+                }}
+                className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
+                  onboardMode === "existing"
+                    ? "bg-emerald-500/15 border-emerald-500/50 ring-1 ring-emerald-500/40 text-white"
+                    : "bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-900"
+                }`}
               >
-                {checkLoading ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-teal-400" />
-                    <span>Checking...</span>
-                  </>
-                ) : (
-                  <>
-                    <Search className="w-3.5 h-3.5 text-teal-400" />
-                    <span>Check Existing Firebase Account</span>
-                  </>
-                )}
+                <div
+                  className={`p-2 rounded-xl shrink-0 ${
+                    onboardMode === "existing" ? "bg-emerald-500/20 text-emerald-400" : "bg-slate-800 text-slate-400"
+                  }`}
+                >
+                  <UserCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold flex items-center gap-1.5 text-slate-100">
+                    <span>Select Existing Firebase Account</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold">
+                      50+ Accounts
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                    Choose from existing Firebase Auth accounts. Passwords and credentials remain untouched.
+                  </p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setOnboardMode("new");
+                  setAddOnboardError("");
+                }}
+                className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
+                  onboardMode === "new"
+                    ? "bg-blue-500/15 border-blue-500/50 ring-1 ring-blue-500/40 text-white"
+                    : "bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-900"
+                }`}
+              >
+                <div
+                  className={`p-2 rounded-xl shrink-0 ${
+                    onboardMode === "new" ? "bg-blue-500/20 text-blue-400" : "bg-slate-800 text-slate-400"
+                  }`}
+                >
+                  <UserPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-slate-100">Create New Firebase Account</div>
+                  <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                    Create a brand-new Firebase Auth user with email, initial password, and permissions.
+                  </p>
+                </div>
               </button>
             </div>
+          </div>
 
-            {checkError && (
-              <div className="text-[11px] text-rose-400 flex items-center gap-1.5 mt-1 font-medium">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                <span>{checkError}</span>
+          {/* Option A: Search & Select Existing Firebase Account */}
+          {onboardMode === "existing" && (
+            <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                  <Users className="w-4 h-4 text-emerald-400" />
+                  <span>Existing Firebase Authentication Accounts ({authAccounts.length})</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={loadAuthAccounts}
+                  disabled={accountsLoading}
+                  className="text-xs text-teal-400 hover:text-teal-300 flex items-center gap-1 font-semibold cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${accountsLoading ? "animate-spin" : ""}`} />
+                  <span>Refresh</span>
+                </button>
               </div>
-            )}
 
-            {/* Existing Account Detected Banner */}
-            {checkResult?.exists && (
-              <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-xs space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 font-bold text-emerald-300">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    <span>Firebase Authentication Account Found</span>
-                  </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold">
-                    {checkResult.disabled ? "Disabled in Auth" : "Active in Auth"}
-                  </span>
+              {/* Search & Filter Bar */}
+              <div className="flex flex-col sm:flex-row gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search by email, name, or assigned class..."
+                    value={accountSearch}
+                    onChange={(e) => setAccountSearch(e.target.value)}
+                    className="w-full pl-9 pr-3.5 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                  />
                 </div>
-                <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-slate-300">
-                  <span className="text-slate-400">Firebase UID:</span>
-                  <span className="bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-emerald-300 font-semibold">
-                    {checkResult.uid}
-                  </span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setAccountFilter("all")}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
+                      accountFilter === "all"
+                        ? "bg-slate-700 text-white border-slate-600"
+                        : "bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200"
+                    }`}
+                  >
+                    All ({authAccounts.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAccountFilter("unconfigured")}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
+                      accountFilter === "unconfigured"
+                        ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                        : "bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200"
+                    }`}
+                  >
+                    Not Configured
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAccountFilter("configured")}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
+                      accountFilter === "configured"
+                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                        : "bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200"
+                    }`}
+                  >
+                    Configured
+                  </button>
                 </div>
-                <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Existing account credentials, password, and Auth status will remain untouched. No password required. Saving will link this UID to Firestore and apply the configured permissions.
-                </p>
-                {checkResult.hasEventAssignment && (
-                  <div className="text-[11px] text-amber-300 bg-amber-950/40 p-2 rounded-lg border border-amber-500/30">
-                    Notice: User already has an assignment for this event. Submitting will update their permissions rather than creating a duplicate.
-                  </div>
-                )}
               </div>
-            )}
 
-            {/* New Account to be Created Banner & Password Field */}
-            {checkResult && !checkResult.exists && (
-              <div className="p-3.5 rounded-xl bg-blue-950/40 border border-blue-500/40 text-xs space-y-3">
-                <div className="flex items-center gap-2 font-bold text-blue-300">
-                  <AlertCircle className="w-4 h-4 text-blue-400" />
-                  <span>No Existing Firebase Account — New Account Will Be Created</span>
+              {/* Loading indicator */}
+              {accountsLoading && (
+                <div className="p-6 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin text-teal-400" />
+                  <span>Loading all 50+ Firebase Authentication accounts...</span>
                 </div>
-                <p className="text-[11px] text-slate-300">
-                  Please set an initial login password for this coordinator. They will log in using this email and password.
-                </p>
+              )}
+
+              {/* Error indicator */}
+              {accountsError && !accountsLoading && (
+                <div className="p-3.5 bg-rose-950/40 border border-rose-500/40 rounded-xl text-rose-300 text-xs space-y-2">
+                  <div className="flex items-center gap-2 font-bold">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                    <span>Failed to load Firebase Authentication accounts</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300">{accountsError}</p>
+                  <button
+                    type="button"
+                    onClick={loadAuthAccounts}
+                    className="px-3 py-1 bg-rose-900/60 hover:bg-rose-800/60 border border-rose-600/50 rounded-lg text-[11px] font-semibold text-rose-200 cursor-pointer"
+                  >
+                    Retry Loading
+                  </button>
+                </div>
+              )}
+
+              {/* Scrollable list of accounts */}
+              {!accountsLoading && !accountsError && (
+                <div className="max-h-60 overflow-y-auto space-y-1.5 p-1 bg-slate-950/60 rounded-xl border border-slate-800/80">
+                  {filteredAccounts.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-slate-400">
+                      No Firebase Authentication accounts found matching "{accountSearch}".
+                    </div>
+                  ) : (
+                    filteredAccounts.map((acc) => {
+                      const isSelected = selectedAccount?.uid === acc.uid;
+                      return (
+                        <div
+                          key={acc.uid}
+                          onClick={() => handleSelectAccount(acc)}
+                          className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                            isSelected
+                              ? "bg-emerald-950/60 border-emerald-500/60 ring-1 ring-emerald-500/40"
+                              : "bg-slate-900/60 hover:bg-slate-800/60 border-slate-800/80"
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-bold font-mono text-slate-100">{acc.email}</span>
+                              <span
+                                className={`text-[10px] px-1.5 py-0.2 rounded font-medium ${
+                                  acc.disabled
+                                    ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
+                                    : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                                }`}
+                              >
+                                {acc.disabled ? "Disabled in Auth" : "Active"}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400 flex-wrap">
+                              {acc.displayName && (
+                                <span className="text-slate-300 font-medium">{acc.displayName} •</span>
+                              )}
+                              <span>
+                                Finance Profile:{" "}
+                                {acc.hasFirestoreProfile ? (
+                                  <span className="text-emerald-400 font-semibold">Configured ({acc.firestoreRole || "Coordinator"})</span>
+                                ) : (
+                                  <span className="text-amber-400 font-semibold">Not Configured</span>
+                                )}
+                              </span>
+                              <span>•</span>
+                              <span>
+                                Assignment:{" "}
+                                {acc.hasEventAssignment ? (
+                                  <span className="text-teal-300 font-semibold">
+                                    {acc.assignedClassName || acc.assignmentType || "Assigned"}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-500">Not Assigned</span>
+                                )}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="shrink-0">
+                            {isSelected ? (
+                              <div className="w-6 h-6 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center font-bold">
+                                <Check className="w-3.5 h-3.5 stroke-[3]" />
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold rounded-lg border border-slate-700"
+                              >
+                                Select
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+
+              {/* Selected account summary badge */}
+              {selectedAccount && (
+                <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-xs space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 font-bold text-emerald-300">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      <span>Selected: {selectedAccount.email}</span>
+                    </div>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-emerald-300">
+                      UID: {selectedAccount.uid}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300">
+                    Existing Firebase Authentication credentials, password, and status remain untouched. No password required.
+                  </p>
+                  {selectedAccount.hasEventAssignment && (
+                    <div className="text-[11px] text-amber-300 bg-amber-950/40 p-2 rounded-lg border border-amber-500/30">
+                      Notice: User is already assigned to this event ({selectedAccount.assignedClassName || selectedAccount.assignmentType}). Submitting will update their assignment and permissions rather than creating a duplicate.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Option B: Create New Firebase Account */}
+          {onboardMode === "new" && (
+            <div className="p-4 rounded-2xl bg-blue-950/20 border border-blue-500/30 space-y-3">
+              <div className="flex items-center gap-2 font-bold text-blue-300 text-xs">
+                <UserPlus className="w-4 h-4 text-blue-400" />
+                <span>New Firebase Authentication Account Details</span>
+              </div>
+              <p className="text-[11px] text-slate-300">
+                Enter the email and initial login password. A new Firebase Authentication account will be created directly on the server.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1 uppercase">
+                    Email Address *
+                  </label>
+                  <input
+                    type="email"
+                    required={onboardMode === "new"}
+                    placeholder="coordinator@college.edu"
+                    value={addEmail}
+                    onChange={(e) => setAddEmail(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs font-mono text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1 uppercase">
                     Initial Password (Min 6 chars) *
@@ -1346,12 +1593,12 @@ export const CoordinatorsPage: React.FC = () => {
                   <div className="relative">
                     <input
                       type={showPassword ? "text" : "password"}
-                      required
+                      required={onboardMode === "new"}
                       minLength={6}
                       placeholder="••••••••"
                       value={addPassword}
                       onChange={(e) => setAddPassword(e.target.value)}
-                      className="w-full pl-3.5 pr-10 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs font-mono text-slate-100 placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                      className="w-full pl-3.5 pr-10 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs font-mono text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500"
                     />
                     <button
                       type="button"
@@ -1363,15 +1610,8 @@ export const CoordinatorsPage: React.FC = () => {
                   </div>
                 </div>
               </div>
-            )}
-
-            {/* If check has not been run yet, show helper */}
-            {!checkResult && (
-              <div className="text-[11px] text-slate-400">
-                Tip: Enter email and click "Check Existing Firebase Account" to check whether this coordinator already exists in Firebase Authentication.
-              </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Section 2: Account Details & Role */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1753,7 +1993,7 @@ export const CoordinatorsPage: React.FC = () => {
               ) : (
                 <>
                   <UserPlus className="w-3.5 h-3.5" />
-                  <span>{checkResult?.exists ? "Link & Save Coordinator" : "Create & Onboard Coordinator"}</span>
+                  <span>{onboardMode === "existing" ? "Link Existing Coordinator Account" : "Create & Onboard Coordinator"}</span>
                 </>
               )}
             </button>

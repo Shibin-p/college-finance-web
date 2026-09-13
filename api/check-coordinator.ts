@@ -2,10 +2,18 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getAdminAuth, getAdminFirestore, verifySuperCoordinatorCaller } from "./_lib/firebaseAdmin";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Always return JSON
+  res.setHeader("Content-Type", "application/json");
+
+  // Handle preflight
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
   // Enforce POST method
   if (req.method !== "POST") {
-    res.setHeader("Allow", ["POST"]);
-    return res.status(405).json({ error: "Method Not Allowed. Use POST." });
+    res.setHeader("Allow", ["POST", "OPTIONS"]);
+    return res.status(405).json({ success: false, error: "Method Not Allowed. Use POST." });
   }
 
   try {
@@ -15,7 +23,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 2. Validate email parameter
     const { email: rawEmail, eventId } = req.body || {};
     if (!rawEmail || typeof rawEmail !== "string" || !rawEmail.trim()) {
-      return res.status(400).json({ error: "Valid email address is required." });
+      return res.status(400).json({ success: false, error: "Valid email address is required." });
     }
 
     const email = rawEmail.trim().toLowerCase();
@@ -28,10 +36,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userRecord = await auth.getUserByEmail(email);
     } catch (authError: any) {
       if (authError.code === "auth/user-not-found") {
-        return res.status(200).json({ exists: false });
+        return res.status(200).json({ success: true, exists: false });
       }
       console.error("[check-coordinator] Auth lookup error:", authError);
-      return res.status(500).json({ error: `Authentication lookup error: ${authError.message || "Unknown error"}` });
+      return res.status(500).json({
+        success: false,
+        error: `Authentication lookup error: ${authError.message || "Unknown error"}`,
+      });
     }
 
     // 4. Check if Firestore user profile exists
@@ -68,6 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 6. Return read-only detected state without modifying anything on Firebase Auth
     return res.status(200).json({
+      success: true,
       exists: true,
       uid: userRecord.uid,
       email: userRecord.email,
@@ -83,6 +95,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const statusCode = error.statusCode || 500;
     console.error("[check-coordinator] Error:", error.message || error);
     return res.status(statusCode).json({
+      success: false,
       error: error.message || "An unexpected error occurred while checking coordinator account.",
     });
   }

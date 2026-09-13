@@ -2,10 +2,18 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getAdminAuth, getAdminFirestore, verifySuperCoordinatorCaller } from "./_lib/firebaseAdmin";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Always return JSON
+  res.setHeader("Content-Type", "application/json");
+
+  // Handle preflight
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
   // Enforce POST method
   if (req.method !== "POST") {
-    res.setHeader("Allow", ["POST"]);
-    return res.status(405).json({ error: "Method Not Allowed. Use POST." });
+    res.setHeader("Allow", ["POST", "OPTIONS"]);
+    return res.status(405).json({ success: false, error: "Method Not Allowed. Use POST." });
   }
 
   try {
@@ -27,21 +35,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       viewerScope,
       viewerPermissions,
       crossClassCollection,
+      existingUid, // Optional: if already selected from the list
     } = req.body || {};
 
     if (!rawEmail || typeof rawEmail !== "string" || !rawEmail.trim()) {
-      return res.status(400).json({ error: "Valid coordinator email address is required." });
+      return res.status(400).json({ success: false, error: "Valid coordinator email address is required." });
     }
     if (!rawName || typeof rawName !== "string" || !rawName.trim()) {
-      return res.status(400).json({ error: "Coordinator full name is required." });
+      return res.status(400).json({ success: false, error: "Coordinator full name is required." });
     }
     if (!role || (role !== "class_coordinator" && role !== "view_coordinator")) {
       return res.status(400).json({
+        success: false,
         error: "Primary role must be strictly 'class_coordinator' or 'view_coordinator'.",
       });
     }
     if (!eventId || typeof eventId !== "string" || !eventId.trim()) {
-      return res.status(400).json({ error: "Active Event ID is required for coordinator assignment." });
+      return res.status(400).json({ success: false, error: "Active Event ID is required for coordinator assignment." });
     }
 
     const email = rawEmail.trim().toLowerCase();
@@ -53,7 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 3. Verify event exists in Firestore
     const eventDoc = await firestore.collection("events").doc(eventId).get();
     if (!eventDoc.exists) {
-      return res.status(404).json({ error: `Event with ID '${eventId}' not found.` });
+      return res.status(404).json({ success: false, error: `Event with ID '${eventId}' not found.` });
     }
     const eventData = eventDoc.data();
     const eventName = eventData?.name || eventId;
@@ -63,34 +73,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let className = "";
     if (role === "class_coordinator") {
       if (!classId || typeof classId !== "string" || !classId.trim()) {
-        return res.status(400).json({ error: "A class assignment is required for Class Coordinators." });
+        return res.status(400).json({ success: false, error: "A class assignment is required for Class Coordinators." });
       }
       validatedClassId = classId.trim();
       const classDoc = await firestore.collection("classes").doc(validatedClassId).get();
       if (!classDoc.exists) {
-        return res.status(404).json({ error: `Class with ID '${validatedClassId}' was not found in system database.` });
+        return res.status(404).json({ success: false, error: `Class with ID '${validatedClassId}' was not found in system database.` });
       }
       className = classDoc.data()?.displayName || validatedClassId;
     } else if (role === "view_coordinator" && viewerScope === "specific_class" && classId) {
       validatedClassId = classId.trim();
+      const classDoc = await firestore.collection("classes").doc(validatedClassId).get();
+      if (classDoc.exists) {
+        className = classDoc.data()?.displayName || validatedClassId;
+      }
     }
 
     // 5. Determine whether account already exists in Firebase Auth
     let uid = "";
     let isExistingAuthUser = false;
 
-    try {
-      const existingAuthUser = await auth.getUserByEmail(email);
-      uid = existingAuthUser.uid;
-      isExistingAuthUser = true;
-      // IMPORTANT: Strictly READ-ONLY on Firebase Authentication for existing users.
-      // Do not update password, email, or disabled status. Never call updateUser.
-    } catch (authErr: any) {
-      if (authErr.code === "auth/user-not-found") {
-        isExistingAuthUser = false;
-      } else {
-        console.error("[onboard-coordinator] Auth lookup error:", authErr);
-        return res.status(500).json({ error: `Firebase Auth verification failed: ${authErr.message || authErr}` });
+    if (existingUid && typeof existingUid === "string" && existingUid.trim()) {
+      // Direct UID lookup for selected existing account
+      try {
+        const userByUid = await auth.getUser(existingUid.trim());
+        uid = userByUid.uid;
+        isExistingAuthUser = true;
+      } catch (uidErr: any) {
+        console.warn("[onboard-coordinator] User lookup by UID failed, trying email:", uidErr.message);
+      }
+    }
+
+    if (!isExistingAuthUser) {
+      try {
+        const existingAuthUser = await auth.getUserByEmail(email);
+        uid = existingAuthUser.uid;
+        isExistingAuthUser = true;
+        // IMPORTANT: Strictly READ-ONLY on Firebase Authentication for existing users.
+        // Do not update password, email, or disabled status. Never call updateUser.
+      } catch (authErr: any) {
+        if (authErr.code === "auth/user-not-found") {
+          isExistingAuthUser = false;
+        } else {
+          console.error("[onboard-coordinator] Auth lookup error:", authErr);
+          return res.status(500).json({
+            success: false,
+            error: `Firebase Auth verification failed: ${authErr.message || authErr}`,
+          });
+        }
       }
     }
 
@@ -98,6 +128,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!isExistingAuthUser) {
       if (!password || typeof password !== "string" || password.length < 6) {
         return res.status(400).json({
+          success: false,
           error: "An initial password of at least 6 characters is required to create a new coordinator account.",
         });
       }
@@ -113,6 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } catch (createErr: any) {
         console.error("[onboard-coordinator] Auth create error:", createErr);
         return res.status(400).json({
+          success: false,
           error: `Failed to create Firebase Authentication account: ${createErr.message || createErr}`,
         });
       }
@@ -255,6 +287,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const statusCode = error.statusCode || 500;
     console.error("[onboard-coordinator] Error:", error.message || error);
     return res.status(statusCode).json({
+      success: false,
       error: error.message || "An unexpected error occurred while onboarding coordinator.",
     });
   }
