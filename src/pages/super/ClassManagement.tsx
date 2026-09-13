@@ -91,7 +91,7 @@ export const ClassManagement: React.FC = () => {
             Academic Classes
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Manage college classes across departments (CSE, CSBS, Cyber, AIDS, Civil, Mech, ECE, SFE, BCA).
+            Manage college classes across departments (CSE, CSBS, Cyber, AIDS, Civil, Mech, ECE, SFE, BCA, T1–T6).
           </p>
         </div>
 

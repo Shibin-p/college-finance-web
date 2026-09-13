@@ -21,13 +21,24 @@ import { ConfirmDialog } from "../../components/common/ConfirmDialog";
 import { EmptyState } from "../../components/common/EmptyState";
 import {
   UserCheck,
-  Plus,
   Sliders,
   Shield,
   Layers,
   Eye,
   CheckSquare,
+  UserPlus,
+  Search,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
+  Lock,
+  Unlock,
 } from "lucide-react";
+import {
+  checkCoordinatorAccount,
+  onboardCoordinatorAccount,
+  type CheckCoordinatorResult,
+} from "../../services/coordinatorOnboardingService";
 
 export const CoordinatorsPage: React.FC = () => {
   const { activeEvent, classes } = useEvent();
@@ -36,6 +47,55 @@ export const CoordinatorsPage: React.FC = () => {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [assignments, setAssignments] = useState<CoordinatorAssignmentModel[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Add Coordinator Modal State
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [addEmail, setAddEmail] = useState("");
+  const [addName, setAddName] = useState("");
+  const [addPassword, setAddPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [addRole, setAddRole] = useState<"class_coordinator" | "view_coordinator">("class_coordinator");
+  const [addAccountActive, setAddAccountActive] = useState(true);
+  const [addLoginEnabled, setAddLoginEnabled] = useState(true);
+
+  // Add Coordinator Permissions State (Strictly Separated Roles & Capabilities)
+  const [addClassId, setAddClassId] = useState<string>("");
+  const [addClassPerms, setAddClassPerms] = useState<CoordinatorPermissions>({
+    canView: true,
+    canViewStudents: true,
+    canAddPayment: true,
+    canAddInstallment: true,
+    canEditPayment: false,
+    canViewReports: true,
+  });
+
+  const [addViewerScope, setAddViewerScope] = useState<ViewerScope>("whole_event");
+  const [addViewerClassId, setAddViewerClassId] = useState<string>("");
+  const [addViewerPerms, setAddViewerPerms] = useState<ViewerPermissions>({
+    canViewAggregate: true,
+    canViewStudentCollectionStatus: false,
+    canViewExpenses: false,
+    canViewExpenseCategories: false,
+  });
+
+  const [addCrossClassEnabled, setAddCrossClassEnabled] = useState(false);
+  const [addAuthorizedClassIds, setAddAuthorizedClassIds] = useState<string[]>([]);
+  const [addCrossClassCaps, setAddCrossClassCaps] = useState<CrossClassCapabilities>({
+    canViewCollection: true,
+    canAddPayment: true,
+    canAddInstallment: true,
+    canHandlePendingApprovals: false,
+    canAccessCentralReceipts: false,
+  });
+
+  // Detection / Verification State
+  const [checkLoading, setCheckLoading] = useState(false);
+  const [checkResult, setCheckResult] = useState<CheckCoordinatorResult | null>(null);
+  const [checkError, setCheckError] = useState("");
+
+  const [addOnboardLoading, setAddOnboardLoading] = useState(false);
+  const [addOnboardError, setAddOnboardError] = useState("");
+  const [addOnboardSuccess, setAddOnboardSuccess] = useState("");
 
   // Edit / Assign Modal State
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -264,6 +324,150 @@ export const CoordinatorsPage: React.FC = () => {
     }
   };
 
+  const openAddCoordinatorModal = () => {
+    setAddEmail("");
+    setAddName("");
+    setAddPassword("");
+    setShowPassword(false);
+    setAddRole("class_coordinator");
+    setAddAccountActive(true);
+    setAddLoginEnabled(true);
+    setAddClassId(classes[0]?.id || "");
+    setAddViewerClassId(classes[0]?.id || "");
+    setAddViewerScope("whole_event");
+    setAddClassPerms({
+      canView: true,
+      canViewStudents: true,
+      canAddPayment: true,
+      canAddInstallment: true,
+      canEditPayment: false,
+      canViewReports: true,
+    });
+    setAddViewerPerms({
+      canViewAggregate: true,
+      canViewStudentCollectionStatus: false,
+      canViewExpenses: false,
+      canViewExpenseCategories: false,
+    });
+    setAddCrossClassEnabled(false);
+    setAddAuthorizedClassIds([]);
+    setAddCrossClassCaps({
+      canViewCollection: true,
+      canAddPayment: true,
+      canAddInstallment: true,
+      canHandlePendingApprovals: false,
+      canAccessCentralReceipts: false,
+    });
+    setCheckResult(null);
+    setCheckError("");
+    setAddOnboardError("");
+    setAddOnboardSuccess("");
+    setAddModalOpen(true);
+  };
+
+  const handleCheckEmail = async () => {
+    if (!addEmail.trim()) {
+      setCheckError("Please enter an email address to verify.");
+      return;
+    }
+    setCheckLoading(true);
+    setCheckError("");
+    try {
+      const result = await checkCoordinatorAccount(addEmail.trim(), activeEvent?.id);
+      setCheckResult(result);
+      if (result.exists) {
+        if (result.displayName && !addName.trim()) {
+          setAddName(result.displayName);
+        } else if (result.firestoreUser?.name && !addName.trim()) {
+          setAddName(result.firestoreUser.name);
+        }
+        if (result.firestoreUser?.role && (result.firestoreUser.role === "class_coordinator" || result.firestoreUser.role === "view_coordinator")) {
+          setAddRole(result.firestoreUser.role);
+        }
+      }
+    } catch (err: any) {
+      setCheckError(err.message || "Failed to check account via server API.");
+      setCheckResult(null);
+    } finally {
+      setCheckLoading(false);
+    }
+  };
+
+  const handleOnboardSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeEvent || !currentUser) return;
+    setAddOnboardError("");
+    setAddOnboardSuccess("");
+
+    if (!addEmail.trim()) {
+      setAddOnboardError("Email address is required.");
+      return;
+    }
+    if (!addName.trim()) {
+      setAddOnboardError("Coordinator full name is required.");
+      return;
+    }
+
+    const isNewUser = checkResult ? !checkResult.exists : false;
+    if (isNewUser) {
+      if (!addPassword || addPassword.length < 6) {
+        setAddOnboardError("Password must be at least 6 characters for new accounts.");
+        return;
+      }
+    }
+
+    if (addRole === "class_coordinator" && !addClassId) {
+      setAddOnboardError("Please select an assigned class for the Class Coordinator.");
+      return;
+    }
+
+    if (addCrossClassEnabled && addAuthorizedClassIds.length === 0) {
+      setAddOnboardError("Please select at least one authorized class for the Cross-Class Collection Assistant.");
+      return;
+    }
+
+    setAddOnboardLoading(true);
+    try {
+      const res = await onboardCoordinatorAccount({
+        email: addEmail.trim(),
+        name: addName.trim(),
+        password: isNewUser ? addPassword : undefined,
+        role: addRole,
+        accountActive: addAccountActive,
+        loginEnabled: addLoginEnabled,
+        eventId: activeEvent.id,
+        classId: addRole === "class_coordinator" ? addClassId : (addViewerScope === "specific_class" ? addViewerClassId : undefined),
+        assignmentType: addRole,
+        permissions: addClassPerms,
+        viewerScope: addViewerScope,
+        viewerPermissions: addViewerPerms,
+        crossClassCollection: {
+          enabled: addCrossClassEnabled,
+          authorizedClassIds: addAuthorizedClassIds,
+          capabilities: addCrossClassCaps,
+        },
+      });
+
+      setAddOnboardSuccess(res.message);
+      await loadData();
+      setTimeout(() => {
+        setAddModalOpen(false);
+      }, 1500);
+    } catch (err: any) {
+      setAddOnboardError(err.message || "Failed to onboard coordinator.");
+    } finally {
+      setAddOnboardLoading(false);
+    }
+  };
+
+  const toggleAddAuthorizedClass = (clsId: string) => {
+    if (addAuthorizedClassIds.includes(clsId)) {
+      setAddAuthorizedClassIds(addAuthorizedClassIds.filter((id) => id !== clsId));
+    } else {
+      setAddAuthorizedClassIds([...addAuthorizedClassIds, clsId]);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header Bar */}
@@ -282,13 +486,25 @@ export const CoordinatorsPage: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => openAssignModal()}
-          className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/25 transition-all flex items-center gap-2 shrink-0 cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Assign / Configure Coordinator</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => openAddCoordinatorModal()}
+            className="px-4 py-2.5 bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-teal-600/25 transition-all flex items-center gap-2 cursor-pointer"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>+ Add Coordinator</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => openAssignModal()}
+            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition-all flex items-center gap-2 cursor-pointer"
+          >
+            <Sliders className="w-4 h-4 text-emerald-400" />
+            <span>Assign Existing</span>
+          </button>
+        </div>
       </div>
 
       {/* Coordinator Assignments Table */}
@@ -1005,6 +1221,541 @@ export const CoordinatorsPage: React.FC = () => {
               className="px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl flex items-center gap-2 cursor-pointer disabled:opacity-50"
             >
               {saveLoading ? "Saving Permissions..." : "Save Coordinator Access"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Automated Add / Onboard Coordinator Modal */}
+      <Modal
+        isOpen={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+        title="Add & Onboard Coordinator"
+        subtitle={`Event: ${activeEvent?.name || "Active Event"} • Automated Firebase Auth & Firestore Linking`}
+        maxWidth="lg"
+      >
+        <form onSubmit={handleOnboardSubmit} className="space-y-6">
+          {addOnboardError && (
+            <div className="p-3.5 bg-rose-950/60 border border-rose-500/30 rounded-xl text-rose-300 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+              <span>{addOnboardError}</span>
+            </div>
+          )}
+
+          {addOnboardSuccess && (
+            <div className="p-3.5 bg-emerald-950/60 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+              <span>{addOnboardSuccess}</span>
+            </div>
+          )}
+
+          {/* Section 1: Email & Account Verification */}
+          <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3">
+            <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+              1. Coordinator Email & Account Detection
+            </label>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="relative flex-1">
+                <input
+                  type="email"
+                  required
+                  placeholder="coordinator@college.edu"
+                  value={addEmail}
+                  onChange={(e) => {
+                    setAddEmail(e.target.value);
+                    if (checkResult) setCheckResult(null);
+                  }}
+                  onBlur={() => {
+                    if (addEmail.trim() && !checkResult && !checkLoading) {
+                      handleCheckEmail();
+                    }
+                  }}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs font-mono text-slate-100 placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleCheckEmail}
+                disabled={checkLoading || !addEmail.trim()}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+              >
+                {checkLoading ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-teal-400" />
+                    <span>Checking...</span>
+                  </>
+                ) : (
+                  <>
+                    <Search className="w-3.5 h-3.5 text-teal-400" />
+                    <span>Check Existing Firebase Account</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {checkError && (
+              <div className="text-[11px] text-rose-400 flex items-center gap-1.5 mt-1 font-medium">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>{checkError}</span>
+              </div>
+            )}
+
+            {/* Existing Account Detected Banner */}
+            {checkResult?.exists && (
+              <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-xs space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 font-bold text-emerald-300">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span>Firebase Authentication Account Found</span>
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold">
+                    {checkResult.disabled ? "Disabled in Auth" : "Active in Auth"}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-slate-300">
+                  <span className="text-slate-400">Firebase UID:</span>
+                  <span className="bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-emerald-300 font-semibold">
+                    {checkResult.uid}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  Existing account credentials, password, and Auth status will remain untouched. No password required. Saving will link this UID to Firestore and apply the configured permissions.
+                </p>
+                {checkResult.hasEventAssignment && (
+                  <div className="text-[11px] text-amber-300 bg-amber-950/40 p-2 rounded-lg border border-amber-500/30">
+                    Notice: User already has an assignment for this event. Submitting will update their permissions rather than creating a duplicate.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* New Account to be Created Banner & Password Field */}
+            {checkResult && !checkResult.exists && (
+              <div className="p-3.5 rounded-xl bg-blue-950/40 border border-blue-500/40 text-xs space-y-3">
+                <div className="flex items-center gap-2 font-bold text-blue-300">
+                  <AlertCircle className="w-4 h-4 text-blue-400" />
+                  <span>No Existing Firebase Account — New Account Will Be Created</span>
+                </div>
+                <p className="text-[11px] text-slate-300">
+                  Please set an initial login password for this coordinator. They will log in using this email and password.
+                </p>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1 uppercase">
+                    Initial Password (Min 6 chars) *
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      required
+                      minLength={6}
+                      placeholder="••••••••"
+                      value={addPassword}
+                      onChange={(e) => setAddPassword(e.target.value)}
+                      className="w-full pl-3.5 pr-10 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs font-mono text-slate-100 placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-200 cursor-pointer"
+                    >
+                      {showPassword ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* If check has not been run yet, show helper */}
+            {!checkResult && (
+              <div className="text-[11px] text-slate-400">
+                Tip: Enter email and click "Check Existing Firebase Account" to check whether this coordinator already exists in Firebase Authentication.
+              </div>
+            )}
+          </div>
+
+          {/* Section 2: Account Details & Role */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
+                Coordinator Full Name *
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. Dr. Alex Morgan"
+                value={addName}
+                onChange={(e) => setAddName(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-teal-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
+                Primary Coordinator Role *
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAddRole("class_coordinator")}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    addRole === "class_coordinator"
+                      ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-300"
+                      : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <CheckSquare className="w-3.5 h-3.5" />
+                  <span>Class Coord</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAddRole("view_coordinator")}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    addRole === "view_coordinator"
+                      ? "bg-teal-500/20 border-teal-500/50 text-teal-300"
+                      : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>View Coord</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: Initial Status Toggles */}
+          <div className="flex items-center gap-6 p-3 bg-slate-900/60 rounded-xl border border-slate-800 text-xs">
+            <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={addAccountActive}
+                onChange={(e) => setAddAccountActive(e.target.checked)}
+                className="rounded bg-slate-900 border-slate-700 text-emerald-500 h-4 w-4"
+              />
+              <span className="font-semibold">Account Active</span>
+            </label>
+            <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={addLoginEnabled}
+                onChange={(e) => setAddLoginEnabled(e.target.checked)}
+                className="rounded bg-slate-900 border-slate-700 text-emerald-500 h-4 w-4"
+              />
+              <span className="font-semibold">Login Enabled</span>
+            </label>
+          </div>
+
+          {/* Section 4: Role-Specific Assignment Configuration */}
+          {addRole === "class_coordinator" && (
+            <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-4">
+              <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Class Coordinator Assignment & Permissions</span>
+              </h4>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
+                  Assigned Class *
+                </label>
+                <select
+                  value={addClassId}
+                  onChange={(e) => setAddClassId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-bold text-slate-100 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                >
+                  {classes.map((cls) => (
+                    <option key={cls.id} value={cls.id}>
+                      {cls.displayName} ({cls.department})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer p-2 rounded-lg hover:bg-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={addClassPerms.canView}
+                    onChange={(e) => setAddClassPerms({ ...addClassPerms, canView: e.target.checked })}
+                    className="rounded bg-slate-900 border-slate-700 text-emerald-500 h-4 w-4"
+                  />
+                  <span>View Collection Dashboard</span>
+                </label>
+                <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer p-2 rounded-lg hover:bg-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={addClassPerms.canViewStudents}
+                    onChange={(e) => setAddClassPerms({ ...addClassPerms, canViewStudents: e.target.checked })}
+                    className="rounded bg-slate-900 border-slate-700 text-emerald-500 h-4 w-4"
+                  />
+                  <span>View Student Roster</span>
+                </label>
+                <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer p-2 rounded-lg hover:bg-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={addClassPerms.canAddPayment}
+                    onChange={(e) => setAddClassPerms({ ...addClassPerms, canAddPayment: e.target.checked })}
+                    className="rounded bg-slate-900 border-slate-700 text-emerald-500 h-4 w-4"
+                  />
+                  <span>Record Direct Payments</span>
+                </label>
+                <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer p-2 rounded-lg hover:bg-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={addClassPerms.canAddInstallment}
+                    onChange={(e) => setAddClassPerms({ ...addClassPerms, canAddInstallment: e.target.checked })}
+                    className="rounded bg-slate-900 border-slate-700 text-emerald-500 h-4 w-4"
+                  />
+                  <span>Record Installments</span>
+                </label>
+                <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer p-2 rounded-lg hover:bg-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={addClassPerms.canViewReports}
+                    onChange={(e) => setAddClassPerms({ ...addClassPerms, canViewReports: e.target.checked })}
+                    className="rounded bg-slate-900 border-slate-700 text-emerald-500 h-4 w-4"
+                  />
+                  <span>View Class Reports</span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {addRole === "view_coordinator" && (
+            <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-4">
+              <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                <Eye className="w-3.5 h-3.5 text-teal-400" />
+                <span>View Coordinator Scope & Permissions</span>
+              </h4>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
+                  Viewer Scope *
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAddViewerScope("whole_event")}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                      addViewerScope === "whole_event"
+                        ? "bg-teal-500/20 border-teal-500/50 text-teal-300"
+                        : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    Whole College / Event
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAddViewerScope("specific_class")}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                      addViewerScope === "specific_class"
+                        ? "bg-teal-500/20 border-teal-500/50 text-teal-300"
+                        : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    Specific Class
+                  </button>
+                </div>
+              </div>
+
+              {addViewerScope === "specific_class" && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
+                    Scoped Class *
+                  </label>
+                  <select
+                    value={addViewerClassId}
+                    onChange={(e) => setAddViewerClassId(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-bold text-slate-100 focus:outline-none focus:border-teal-500 cursor-pointer"
+                  >
+                    {classes.map((cls) => (
+                      <option key={cls.id} value={cls.id}>
+                        {cls.displayName} ({cls.department})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer p-2 rounded-lg hover:bg-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={addViewerPerms.canViewAggregate}
+                    onChange={(e) => setAddViewerPerms({ ...addViewerPerms, canViewAggregate: e.target.checked })}
+                    className="rounded bg-slate-900 border-slate-700 text-teal-500 h-4 w-4"
+                  />
+                  <span>View Aggregate Statistics</span>
+                </label>
+                <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer p-2 rounded-lg hover:bg-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={addViewerPerms.canViewStudentCollectionStatus}
+                    onChange={(e) => setAddViewerPerms({ ...addViewerPerms, canViewStudentCollectionStatus: e.target.checked })}
+                    className="rounded bg-slate-900 border-slate-700 text-teal-500 h-4 w-4"
+                  />
+                  <span>View Student Payment Status</span>
+                </label>
+                <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer p-2 rounded-lg hover:bg-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={addViewerPerms.canViewExpenses}
+                    onChange={(e) => setAddViewerPerms({ ...addViewerPerms, canViewExpenses: e.target.checked })}
+                    className="rounded bg-slate-900 border-slate-700 text-teal-500 h-4 w-4"
+                  />
+                  <span>View Expenditures Ledger</span>
+                </label>
+                <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer p-2 rounded-lg hover:bg-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={addViewerPerms.canViewExpenseCategories}
+                    onChange={(e) => setAddViewerPerms({ ...addViewerPerms, canViewExpenseCategories: e.target.checked })}
+                    className="rounded bg-slate-900 border-slate-700 text-teal-500 h-4 w-4"
+                  />
+                  <span>View Expense Categories Breakdown</span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {/* Section 5: Cross-Class Collection Assistant Capability (Independent Extension) */}
+          <div className="p-4 rounded-2xl bg-teal-950/20 border border-teal-500/30 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="flex items-center gap-2 text-xs font-bold text-teal-300 uppercase tracking-wider cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={addCrossClassEnabled}
+                    onChange={(e) => setAddCrossClassEnabled(e.target.checked)}
+                    className="rounded bg-slate-900 border-teal-700 text-teal-500 h-4 w-4"
+                  />
+                  <span>Cross-Class Collection Assistant Capability</span>
+                </label>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Grant this coordinator field collection capability across multiple authorized classes. Does NOT grant primary permissions.
+                </p>
+              </div>
+            </div>
+
+            {addCrossClassEnabled && (
+              <div className="space-y-3 pt-2 border-t border-teal-500/20">
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-[11px] font-bold text-slate-300 uppercase">
+                      Authorized Classes ({addAuthorizedClassIds.length}/{classes.length}) *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (addAuthorizedClassIds.length === classes.length) {
+                          setAddAuthorizedClassIds([]);
+                        } else {
+                          setAddAuthorizedClassIds(classes.map((c) => c.id));
+                        }
+                      }}
+                      className="text-[10px] text-teal-400 hover:text-teal-300 underline font-semibold cursor-pointer"
+                    >
+                      {addAuthorizedClassIds.length === classes.length ? "Clear All" : "Authorize All Classes"}
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-2 bg-slate-950 rounded-xl border border-slate-800">
+                    {classes.map((cls) => {
+                      const isAuth = addAuthorizedClassIds.includes(cls.id);
+                      return (
+                        <button
+                          key={cls.id}
+                          type="button"
+                          onClick={() => toggleAddAuthorizedClass(cls.id)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer border ${
+                            isAuth
+                              ? "bg-teal-500/20 text-teal-300 border-teal-500/40"
+                              : "bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700"
+                          }`}
+                        >
+                          {cls.displayName}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer p-2 rounded-lg hover:bg-slate-900">
+                    <input
+                      type="checkbox"
+                      checked={addCrossClassCaps.canViewCollection}
+                      onChange={(e) => setAddCrossClassCaps({ ...addCrossClassCaps, canViewCollection: e.target.checked })}
+                      className="rounded bg-slate-900 border-slate-700 text-teal-500 h-4 w-4"
+                    />
+                    <span>Can View Collection Rosters</span>
+                  </label>
+                  <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer p-2 rounded-lg hover:bg-slate-900">
+                    <input
+                      type="checkbox"
+                      checked={addCrossClassCaps.canAddPayment}
+                      onChange={(e) => setAddCrossClassCaps({ ...addCrossClassCaps, canAddPayment: e.target.checked })}
+                      className="rounded bg-slate-900 border-slate-700 text-teal-500 h-4 w-4"
+                    />
+                    <span>Record Full Payments</span>
+                  </label>
+                  <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer p-2 rounded-lg hover:bg-slate-900">
+                    <input
+                      type="checkbox"
+                      checked={addCrossClassCaps.canAddInstallment}
+                      onChange={(e) => setAddCrossClassCaps({ ...addCrossClassCaps, canAddInstallment: e.target.checked })}
+                      className="rounded bg-slate-900 border-slate-700 text-teal-500 h-4 w-4"
+                    />
+                    <span>Record Installments</span>
+                  </label>
+                  <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer p-2 rounded-lg hover:bg-slate-900">
+                    <input
+                      type="checkbox"
+                      checked={addCrossClassCaps.canHandlePendingApprovals}
+                      onChange={(e) => setAddCrossClassCaps({ ...addCrossClassCaps, canHandlePendingApprovals: e.target.checked })}
+                      className="rounded bg-slate-900 border-slate-700 text-teal-500 h-4 w-4"
+                    />
+                    <span>Handle Pending Approvals</span>
+                  </label>
+                  <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer p-2 rounded-lg hover:bg-slate-900 sm:col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={addCrossClassCaps.canAccessCentralReceipts || false}
+                      onChange={(e) => setAddCrossClassCaps({ ...addCrossClassCaps, canAccessCentralReceipts: e.target.checked })}
+                      className="rounded bg-slate-900 border-slate-700 text-teal-500 h-4 w-4"
+                    />
+                    <div>
+                      <span className="font-semibold block">Access Central Receipts</span>
+                      <span className="text-[10px] text-slate-400">Record physical handover receipts into central custody</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4 border-t border-slate-800">
+            <button
+              type="button"
+              onClick={() => setAddModalOpen(false)}
+              className="px-4 py-2 text-xs font-semibold text-slate-400 bg-slate-800 rounded-xl cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={addOnboardLoading}
+              className="px-5 py-2 text-xs font-bold text-white bg-teal-600 hover:bg-teal-500 rounded-xl flex items-center gap-2 cursor-pointer disabled:opacity-50 shadow-lg shadow-teal-600/25"
+            >
+              {addOnboardLoading ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Onboarding Coordinator...</span>
+                </>
+              ) : (
+                <>
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>{checkResult?.exists ? "Link & Save Coordinator" : "Create & Onboard Coordinator"}</span>
+                </>
+              )}
             </button>
           </div>
         </form>

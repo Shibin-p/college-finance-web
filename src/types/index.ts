@@ -49,6 +49,12 @@ export const DEPARTMENTS = [
   "ECE",
   "SFE",
   "BCA",
+  "T1",
+  "T2",
+  "T3",
+  "T4",
+  "T5",
+  "T6",
 ] as const;
 
 export type Department = typeof DEPARTMENTS[number];
