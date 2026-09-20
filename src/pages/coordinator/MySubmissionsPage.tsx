@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { useEvent } from "../../hooks/useEvent";
 import { useAuth } from "../../hooks/useAuth";
-import { fetchPayments } from "../../services/paymentService";
+import { fetchPayments, cancelPaymentSubmission } from "../../services/paymentService";
 import { fetchAllStudents } from "../../services/studentService";
 import type { PaymentModel, StudentModel } from "../../types";
 import { StatusBadge } from "../../components/common/StatusBadge";
+import { ConfirmDialog } from "../../components/common/ConfirmDialog";
 import { EmptyState } from "../../components/common/EmptyState";
 import { formatINR, formatDateTime } from "../../utils/formatters";
-import { CheckSquare, Search } from "lucide-react";
+import { CheckSquare, Search, XCircle } from "lucide-react";
 
 export const MySubmissionsPage: React.FC = () => {
   const { activeEvent } = useEvent();
@@ -18,6 +19,34 @@ export const MySubmissionsPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
+
+  // FEATURE 4: Cancel Submission state
+  const [cancelTarget, setCancelTarget] = useState<PaymentModel | null>(null);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set());
+
+  const handleCancelSubmit = async () => {
+    if (!cancelTarget || !userProfile || cancelLoading) return;
+    const targetId = cancelTarget.id;
+    setCancelLoading(true);
+    setCancellingIds((prev) => new Set(prev).add(targetId));
+
+    try {
+      await cancelPaymentSubmission(targetId, userProfile);
+      await loadData();
+      setCancelTarget(null);
+    } catch (err: any) {
+      console.error("Failed to cancel submission:", err);
+      alert(err.message || "Failed to cancel payment submission. Please try again.");
+    } finally {
+      setCancelLoading(false);
+      setCancellingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(targetId);
+        return next;
+      });
+    }
+  };
 
   const loadData = async () => {
     if (!activeEvent || !userProfile) return;
@@ -57,6 +86,7 @@ export const MySubmissionsPage: React.FC = () => {
 
   const pendingCount = payments.filter((p) => p.status === "pending_approval").length;
   const approvedCount = payments.filter((p) => p.status === "approved").length;
+  const cancelledCount = payments.filter((p) => p.status === "cancelled").length;
   const approvedTotal = payments
     .filter((p) => p.status === "approved")
     .reduce((sum, p) => sum + (p.amount || 0), 0);
@@ -118,6 +148,17 @@ export const MySubmissionsPage: React.FC = () => {
           >
             Approved ({approvedCount})
           </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter("cancelled")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+              statusFilter === "cancelled"
+                ? "bg-slate-800 text-slate-200 border border-slate-700"
+                : "bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800"
+            }`}
+          >
+            Cancelled ({cancelledCount})
+          </button>
         </div>
 
         <div className="relative w-full sm:w-64">
@@ -174,8 +215,30 @@ export const MySubmissionsPage: React.FC = () => {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2.5">
                     <StatusBadge status={p.status} />
+                    {p.status === "pending_approval" && (
+                      <button
+                        type="button"
+                        disabled={cancellingIds.has(p.id) || cancelLoading}
+                        onClick={() => setCancelTarget(p)}
+                        className={`px-2.5 py-1 text-xs font-semibold text-rose-300 hover:text-rose-200 bg-rose-950/60 hover:bg-rose-900/80 border border-rose-800/60 rounded-xl transition-all flex items-center gap-1.5 ${
+                          cancellingIds.has(p.id) ? "opacity-60 cursor-not-allowed" : "cursor-pointer"
+                        }`}
+                      >
+                        {cancellingIds.has(p.id) ? (
+                          <>
+                            <div className="w-3 h-3 border-2 border-rose-400/30 border-t-rose-400 rounded-full animate-spin" />
+                            <span>Cancelling...</span>
+                          </>
+                        ) : (
+                          <>
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Cancel Submission</span>
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -183,6 +246,33 @@ export const MySubmissionsPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Cancel Payment Submission Confirmation Modal */}
+      {cancelTarget && (
+        <ConfirmDialog
+          isOpen={!!cancelTarget}
+          onClose={() => {
+            if (!cancelLoading) setCancelTarget(null);
+          }}
+          onConfirm={handleCancelSubmit}
+          title="Cancel Payment Submission?"
+          message={
+            <div className="space-y-2">
+              <p>
+                Are you sure you want to cancel this payment submission of{" "}
+                <strong className="text-white">{formatINR(cancelTarget.amount)}</strong> for{" "}
+                <strong className="text-white">{studentMap.get(cancelTarget.studentId)?.name || "Student"}</strong>?
+              </p>
+              <p className="text-xs text-slate-400">
+                This will remove the item from the Super Coordinator's pending approval queue. The submission record will remain in your history marked as cancelled.
+              </p>
+            </div>
+          }
+          confirmLabel={cancelLoading ? "Cancelling..." : "Confirm Cancellation"}
+          loading={cancelLoading}
+          variant="danger"
+        />
+      )}
     </div>
   );
 };

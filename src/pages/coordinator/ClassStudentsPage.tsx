@@ -29,6 +29,8 @@ import {
   Plus,
   History,
   Clock,
+  AlertTriangle,
+  Info,
 } from "lucide-react";
 
 export const ClassStudentsPage: React.FC = () => {
@@ -321,12 +323,45 @@ export const ClassStudentsPage: React.FC = () => {
           subtitle={`Student: ${paymentTarget.student.name} (${paymentTarget.student.registerNumber})`}
           maxWidth="md"
         >
-          <form onSubmit={handleAddPayment} className="space-y-4">
-            {paymentError && (
-              <div className="p-3 bg-rose-950/60 border border-rose-500/30 rounded-xl text-rose-300 text-xs">
-                {paymentError}
-              </div>
-            )}
+          {(() => {
+            const targetPayments = payments.filter(
+              (p) => p.participantId === paymentTarget.participant.id || p.studentId === paymentTarget.student.id
+            );
+            const targetFin = calculateStudentFinancials(paymentTarget.participant, targetPayments);
+            const isFullySettled = targetFin.approvedPaid >= (targetFin.requiredAmount || 0) && (targetFin.requiredAmount || 0) > 0;
+
+            return (
+              <form onSubmit={handleAddPayment} className="space-y-4">
+                {paymentError && (
+                  <div className="p-3 bg-rose-950/60 border border-rose-500/30 rounded-xl text-rose-300 text-xs">
+                    {paymentError}
+                  </div>
+                )}
+
+                {/* FEATURE 1: Already Paid Alert (Non-blocking warning) */}
+                {isFullySettled && (
+                  <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-300 text-xs flex items-start gap-3 animate-in fade-in">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <p className="font-bold text-amber-200">
+                        Already Paid {formatINR(targetFin.approvedPaid)}
+                      </p>
+                      <p className="text-[11px] text-amber-300/80 leading-relaxed">
+                        This student has already paid {formatINR(targetFin.approvedPaid)} (required event target: {formatINR(targetFin.requiredAmount)}). You can still continue to record an additional/extra payment below.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {targetFin.isPartiallyPaid && (
+                  <div className="p-2.5 bg-blue-500/10 border border-blue-500/20 rounded-xl text-blue-300 text-xs flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Info className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                      <span>Paid: <strong className="font-mono text-blue-200">{formatINR(targetFin.approvedPaid)}</strong> of {formatINR(targetFin.requiredAmount)}</span>
+                    </div>
+                    <span className="text-[11px] font-mono text-amber-300 font-semibold">Due: {formatINR(targetFin.remainingAmount)}</span>
+                  </div>
+                )}
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
@@ -415,8 +450,10 @@ export const ClassStudentsPage: React.FC = () => {
                 {paymentLoading ? "Submitting..." : "Submit for Approval"}
               </button>
             </div>
-          </form>
-        </Modal>
+            </form>
+          );
+        })()}
+      </Modal>
       )}
 
       {/* History Modal */}

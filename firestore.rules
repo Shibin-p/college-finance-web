@@ -114,7 +114,7 @@ service cloud.firestore {
         isActiveUser() &&
         resource.data.addedBy == request.auth.uid &&
         resource.data.status == 'pending_approval' &&
-        request.resource.data.status == 'pending_approval' &&
+        request.resource.data.status in ['pending_approval', 'cancelled'] &&
         isEventActive(resource.data.eventId)
       );
       allow delete: if isSuperCoordinator();

@@ -22,6 +22,9 @@ import {
   User,
   AlertCircle,
   ArrowRight,
+  AlertTriangle,
+  Info,
+  Clock,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -188,30 +191,64 @@ export const ClassCollectionPage: React.FC = () => {
           </label>
 
           {selectedStudent ? (
-            <div className="p-4 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-emerald-500/20 rounded-xl text-emerald-400">
-                  <User className="w-5 h-5" />
+            <>
+              <div className="p-4 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-emerald-500/20 rounded-xl text-emerald-400">
+                    <User className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-100">{selectedStudent.name}</h3>
+                    <p className="text-xs text-slate-400 font-mono">
+                      Reg: <strong className="text-slate-200">{selectedStudent.registerNumber}</strong> • Due:{" "}
+                      <strong className="text-amber-400">
+                        {formatINR(financials?.remainingAmount)}
+                      </strong>
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-bold text-sm text-slate-100">{selectedStudent.name}</h3>
-                  <p className="text-xs text-slate-400 font-mono">
-                    Reg: <strong className="text-slate-200">{selectedStudent.registerNumber}</strong> • Due:{" "}
-                    <strong className="text-amber-400">
-                      {formatINR(financials?.remainingAmount)}
-                    </strong>
-                  </p>
-                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedStudent(null)}
+                  className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 rounded-lg cursor-pointer"
+                >
+                  Change
+                </button>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setSelectedStudent(null)}
-                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 rounded-lg cursor-pointer"
-              >
-                Change
-              </button>
-            </div>
+              {/* FEATURE 1: Already Paid Alert (Non-blocking warning for extra payment) */}
+              {financials && financials.approvedPaid >= (financials.requiredAmount || 0) && (financials.requiredAmount || 0) > 0 && (
+                <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-300 text-xs flex items-start gap-3 mt-3 animate-in fade-in">
+                  <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold text-amber-200 text-sm">
+                      Already Paid {formatINR(financials.approvedPaid)}
+                    </p>
+                    <p className="text-[11px] text-amber-300/80 leading-relaxed">
+                      This student has already paid {formatINR(financials.approvedPaid)} (required event target: {formatINR(financials.requiredAmount)}). You can still continue to record an additional/extra payment below.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {financials && financials.isPartiallyPaid && (
+                <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-blue-300 text-xs flex items-center justify-between mt-3 animate-in fade-in">
+                  <div className="flex items-center gap-2">
+                    <Info className="w-4 h-4 text-blue-400 shrink-0" />
+                    <span>Already Paid: <strong className="font-mono text-blue-200">{formatINR(financials.approvedPaid)}</strong> of {formatINR(financials.requiredAmount)}</span>
+                  </div>
+                  <span className="text-[11px] font-mono text-amber-300 font-semibold">Remaining Due: {formatINR(financials.remainingAmount)}</span>
+                </div>
+              )}
+
+              {financials && financials.pendingApprovalAmount > 0 && (
+                <div className="p-3 bg-amber-950/40 border border-amber-500/20 rounded-2xl text-amber-300 text-[11px] flex items-center gap-2 mt-2">
+                  <Clock className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Note: {formatINR(financials.pendingApprovalAmount)} is currently awaiting Super Coordinator approval.</span>
+                </div>
+              )}
+            </>
           ) : (
             <div className="space-y-2">
               <div className="relative">

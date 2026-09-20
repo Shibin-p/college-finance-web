@@ -551,6 +551,7 @@ export function calculateReconciliation(
   let otherReceived = 0;
 
   for (const r of filteredReceipts) {
+    if (r.status === "rolled_back") continue;
     centralReceiptTotal += r.totalAmount || 0;
     cashReceived += r.cashAmount || 0;
     digitalReceived += r.digitalAmount || 0;

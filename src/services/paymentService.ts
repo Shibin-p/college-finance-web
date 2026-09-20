@@ -218,37 +218,128 @@ export async function declinePayment(
   });
 }
 
+const activePaymentRollbackLocks = new Set<string>();
+
 export async function rollbackPayment(
   paymentId: string,
   reason: string,
   user: UserProfile
 ): Promise<void> {
-  const ref = doc(db, COLLECTIONS.PAYMENTS, paymentId);
-  const snap = await getDoc(ref);
-  const paymentData = snap.data() as PaymentModel | undefined;
-  const now = serverTimestamp();
+  if (user.role !== "super_coordinator" || user.active === false || user.loginEnabled === false) {
+    throw new Error("Unauthorized: Only an active Super Coordinator can rollback a payment.");
+  }
 
-  await updateDoc(ref, {
-    status: "rolled_back" as PaymentStatus,
-    rolledBackBy: user.uid,
-    rolledBackByName: user.name,
-    rolledBackAt: now,
-    updatedAt: now,
-  });
+  if (activePaymentRollbackLocks.has(paymentId)) {
+    throw new Error("A rollback request for this payment is already being processed.");
+  }
 
-  await logAudit({
-    userId: user.uid,
-    userRole: user.role === "super_coordinator" ? "Super Coordinator" : user.role,
-    userName: user.name,
-    action: "rollback_payment",
-    category: "payment_rollback",
-    eventId: paymentData?.eventId,
-    classId: paymentData?.classId,
-    studentId: paymentData?.studentId,
-    paymentId,
-    amount: paymentData?.amount,
-    description: `Rolled back approved payment of ₹${paymentData?.amount || 0}. Reason: ${reason || "None specified"}`,
-  });
+  activePaymentRollbackLocks.add(paymentId);
+  try {
+    const ref = doc(db, COLLECTIONS.PAYMENTS, paymentId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      throw new Error("Payment record not found.");
+    }
+    const paymentData = snap.data() as PaymentModel | undefined;
+    if (!paymentData) {
+      throw new Error("Payment record data is invalid.");
+    }
+    if (paymentData.status === "rolled_back") {
+      throw new Error("This payment has already been rolled back.");
+    }
+
+    const now = serverTimestamp();
+
+    await updateDoc(ref, {
+      status: "rolled_back" as PaymentStatus,
+      rolledBackBy: user.uid,
+      rolledBackByName: user.name,
+      rolledBackAt: now,
+      updatedAt: now,
+    });
+
+    await logAudit({
+      userId: user.uid,
+      userRole: user.role === "super_coordinator" ? "Super Coordinator" : user.role,
+      userName: user.name,
+      action: "rollback_payment",
+      category: "payment_rollback",
+      eventId: paymentData?.eventId,
+      classId: paymentData?.classId,
+      studentId: paymentData?.studentId,
+      paymentId,
+      amount: paymentData?.amount,
+      description: `Rolled back approved payment of ₹${paymentData?.amount || 0}. Reason: ${reason || "None specified"}`,
+    });
+  } finally {
+    activePaymentRollbackLocks.delete(paymentId);
+  }
+}
+
+const activePaymentCancelLocks = new Set<string>();
+
+export async function cancelPaymentSubmission(
+  paymentId: string,
+  user: UserProfile
+): Promise<void> {
+  if (!user.active || !user.loginEnabled) {
+    throw new Error("Unauthorized: Inactive user account.");
+  }
+
+  if (activePaymentCancelLocks.has(paymentId)) {
+    throw new Error("A cancellation request for this submission is already being processed.");
+  }
+
+  activePaymentCancelLocks.add(paymentId);
+  try {
+    const ref = doc(db, COLLECTIONS.PAYMENTS, paymentId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      throw new Error("Payment submission not found.");
+    }
+    const paymentData = snap.data() as PaymentModel;
+
+    // Only allow cancelling pending approval payments
+    if (paymentData.status !== "pending_approval") {
+      throw new Error("Only pending approval submissions can be cancelled.");
+    }
+
+    // Only allow the original submitter or super coordinator to cancel
+    if (paymentData.addedBy !== user.uid && user.role !== "super_coordinator") {
+      throw new Error("Unauthorized: You can only cancel your own pending payment submissions.");
+    }
+
+    const now = serverTimestamp();
+    await updateDoc(ref, {
+      status: "cancelled" as PaymentStatus,
+      cancelledBy: user.uid,
+      cancelledByName: user.name,
+      cancelledAt: now,
+      updatedAt: now,
+    });
+
+    await logAudit({
+      userId: user.uid,
+      userRole: user.role === "super_coordinator" ? "Super Coordinator" : "Class Coordinator",
+      userName: user.name,
+      action: "PAYMENT_SUBMISSION_CANCELLED",
+      category: "fund_collection",
+      eventId: paymentData.eventId,
+      classId: paymentData.classId,
+      studentId: paymentData.studentId,
+      paymentId,
+      amount: paymentData.amount,
+      description: `Cancelled pending payment submission of ₹${paymentData.amount || 0} for student ${paymentData.studentId}`,
+      metadata: {
+        paymentId,
+        studentId: paymentData.studentId,
+        amount: paymentData.amount,
+        paymentMethod: paymentData.paymentMethod,
+      },
+    });
+  } finally {
+    activePaymentCancelLocks.delete(paymentId);
+  }
 }
 
 export async function fetchPayments(

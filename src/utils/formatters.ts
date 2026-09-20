@@ -76,8 +76,60 @@ export function formatDateTime(date: any): string {
 
 export function getTodayDateString(): string {
   const d = new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return getISTDateString(d);
+}
+
+/**
+ * Returns YYYY-MM-DD string in Asia/Kolkata timezone from any date/timestamp representation.
+ */
+export function getISTDateString(timestamp: any): string {
+  if (!timestamp) return "";
+  try {
+    let dateObj: Date | null = null;
+    if (typeof timestamp.toDate === "function") {
+      dateObj = timestamp.toDate();
+    } else if (timestamp instanceof Date) {
+      dateObj = timestamp;
+    } else if (typeof timestamp === "string") {
+      dateObj = new Date(timestamp);
+    } else if (typeof timestamp === "number") {
+      dateObj = new Date(timestamp);
+    } else if (timestamp.seconds) {
+      dateObj = new Date(timestamp.seconds * 1000);
+    }
+    if (!dateObj || isNaN(dateObj.getTime())) return "";
+
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(dateObj);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Formats a YYYY-MM-DD string into readable "DD MMM YYYY" in IST.
+ */
+export function formatISTDisplayDate(dateStr: string): string {
+  if (!dateStr) return "—";
+  try {
+    const parts = dateStr.split("-");
+    if (parts.length === 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      const d = new Date(year, month, day);
+      return d.toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+    }
+    return formatDate(dateStr);
+  } catch {
+    return dateStr;
+  }
 }

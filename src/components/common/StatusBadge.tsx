@@ -47,6 +47,18 @@ const statusConfig: Record<
     text: "text-purple-400",
     border: "border-purple-500/20",
   },
+  cancelled: {
+    label: "Cancelled",
+    bg: "bg-slate-800/80",
+    text: "text-slate-400",
+    border: "border-slate-700",
+  },
+  submission_cancelled: {
+    label: "Submission Cancelled",
+    bg: "bg-slate-800/80",
+    text: "text-slate-400",
+    border: "border-slate-700",
+  },
 
   // Student Payment State
   fully_paid: {

@@ -104,7 +104,7 @@ export interface EventParticipantModel {
 
 export type PaymentMethod = "cash" | "upi" | "bank_transfer" | "other";
 
-export type PaymentStatus = "pending_approval" | "approved" | "declined" | "rolled_back";
+export type PaymentStatus = "pending_approval" | "approved" | "declined" | "rolled_back" | "cancelled";
 
 export interface PaymentModel {
   id: string;
@@ -129,6 +129,9 @@ export interface PaymentModel {
   rolledBackBy?: string;
   rolledBackByName?: string;
   rolledBackAt?: any;
+  cancelledBy?: string;
+  cancelledByName?: string;
+  cancelledAt?: any;
 }
 
 export interface CentralReceiptModel {
@@ -146,6 +149,11 @@ export interface CentralReceiptModel {
   receivedByName?: string;
   receivedByRole?: string;
   remarks?: string;
+  status?: "active" | "rolled_back";
+  rolledBackBy?: string;
+  rolledBackByName?: string;
+  rolledBackAt?: any;
+  rollbackReason?: string;
   createdAt?: any;
   updatedAt?: any;
 }
@@ -221,6 +229,7 @@ export type AuditCategory =
   | "fund_collection"
   | "fund_approval"
   | "payment_rollback"
+  | "payment_cancellation"
   | "installment"
   | "exemption"
   | "coordinator_waiver"

@@ -1,7 +1,10 @@
 import {
   collection,
+  doc,
+  getDoc,
   getDocs,
   addDoc,
+  updateDoc,
   serverTimestamp,
   query,
   where,
@@ -180,5 +183,68 @@ export async function fetchCentralReceipts(
   } catch (error: any) {
     console.error(`Error fetching central receipts for event ${eventId}:`, error);
     throw error;
+  }
+}
+
+const activeReceiptRollbackLocks = new Set<string>();
+
+export async function rollbackCentralReceipt(
+  receiptId: string,
+  reason: string,
+  user: UserProfile
+): Promise<void> {
+  if (user.role !== "super_coordinator" || user.active === false || user.loginEnabled === false) {
+    throw new Error("Unauthorized: Only an active Super Coordinator can rollback a central receipt.");
+  }
+
+  if (activeReceiptRollbackLocks.has(receiptId)) {
+    throw new Error("A rollback request for this central receipt is already being processed.");
+  }
+
+  activeReceiptRollbackLocks.add(receiptId);
+  try {
+    const ref = doc(db, COLLECTIONS.CENTRAL_RECEIPTS, receiptId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      throw new Error("Central receipt not found.");
+    }
+    const receiptData = snap.data() as CentralReceiptModel;
+    if (receiptData.status === "rolled_back") {
+      throw new Error("This central receipt has already been rolled back.");
+    }
+
+    const now = serverTimestamp();
+    await updateDoc(ref, {
+      status: "rolled_back",
+      rolledBackBy: user.uid,
+      rolledBackByName: user.name,
+      rolledBackAt: now,
+      rollbackReason: reason?.trim() || "Rolled back by Super Coordinator",
+      updatedAt: now,
+    });
+
+    await logAudit({
+      userId: user.uid,
+      userRole: "Super Coordinator",
+      userName: user.name,
+      action: "CENTRAL_RECEIPT_ROLLED_BACK",
+      category: "central_receipt",
+      eventId: receiptData.eventId,
+      classId: receiptData.classId,
+      receiptId,
+      amount: receiptData.totalAmount,
+      description: `Rolled back central receipt of ₹${receiptData.totalAmount} (Cash: ₹${receiptData.cashAmount || 0}, Digital: ₹${receiptData.digitalAmount || 0})`,
+      metadata: {
+        originalReceiptId: receiptId,
+        originalAmount: receiptData.totalAmount,
+        cashAmount: receiptData.cashAmount,
+        digitalAmount: receiptData.digitalAmount,
+        otherAmount: receiptData.otherAmount,
+        date: receiptData.date,
+        reason: reason?.trim() || "",
+      },
+    });
+  } finally {
+    activeReceiptRollbackLocks.delete(receiptId);
   }
 }
