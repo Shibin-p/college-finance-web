@@ -353,6 +353,21 @@ export const ClassStudentsPage: React.FC = () => {
                   </div>
                 )}
 
+                {/* CASE 2: Already Awaiting Approval Alert (Non-blocking warning) */}
+                {targetFin.pendingApprovalAmount > 0 && (
+                  <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-300 text-xs flex items-start gap-3 animate-in fade-in">
+                    <Clock className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <p className="font-bold text-amber-200">
+                        Already Awaiting Approval — {formatINR(targetFin.pendingApprovalAmount)}
+                      </p>
+                      <p className="text-[11px] text-amber-300/80 leading-relaxed">
+                        This student already has {formatINR(targetFin.pendingApprovalAmount)} awaiting Super Coordinator approval. You can still continue to record an additional/extra payment below.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {targetFin.isPartiallyPaid && (
                   <div className="p-2.5 bg-blue-500/10 border border-blue-500/20 rounded-xl text-blue-300 text-xs flex items-center justify-between">
                     <div className="flex items-center gap-1.5">

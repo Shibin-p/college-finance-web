@@ -41,6 +41,7 @@ import {
   Lock,
   Receipt,
   AlertTriangle,
+  Clock,
 } from "lucide-react";
 
 export const CollectionAssistantDashboard: React.FC = () => {
@@ -77,6 +78,7 @@ export const CollectionAssistantDashboard: React.FC = () => {
     remainingAmount: number;
     approvedPaid?: number;
     requiredAmount?: number;
+    pendingApprovalAmount?: number;
   } | null>(null);
   const [amount, setAmount] = useState("500");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
@@ -565,6 +567,7 @@ export const CollectionAssistantDashboard: React.FC = () => {
                                       remainingAmount: fin.remainingAmount,
                                       approvedPaid: fin.approvedPaid,
                                       requiredAmount: fin.requiredAmount,
+                                      pendingApprovalAmount: fin.pendingApprovalAmount,
                                     });
                                     setAmount(
                                       fin.remainingAmount > 0 ? String(fin.remainingAmount) : "500"
@@ -773,6 +776,21 @@ export const CollectionAssistantDashboard: React.FC = () => {
                   </p>
                   <p className="text-[11px] text-amber-300/80 leading-relaxed">
                     This student has already paid {formatINR(paymentTarget.approvedPaid ?? 0)} (required target: {formatINR(paymentTarget.requiredAmount ?? 0)}). You can still continue to record an additional/extra collection below.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* CASE 2: Already Awaiting Approval Alert (Non-blocking warning) */}
+            {(paymentTarget.pendingApprovalAmount ?? 0) > 0 && (
+              <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-300 text-xs flex items-start gap-3 animate-in fade-in">
+                <Clock className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <p className="font-bold text-amber-200">
+                    Already Awaiting Approval — {formatINR(paymentTarget.pendingApprovalAmount ?? 0)}
+                  </p>
+                  <p className="text-[11px] text-amber-300/80 leading-relaxed">
+                    This student already has {formatINR(paymentTarget.pendingApprovalAmount ?? 0)} awaiting Super Coordinator approval. You can still continue to record an additional collection below.
                   </p>
                 </div>
               </div>
