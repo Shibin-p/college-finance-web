@@ -43,9 +43,9 @@ service cloud.firestore {
     }
 
     // Cross-Class Assistant Central Receipts server-side permission check
-    function hasCentralReceiptsPermission(eventId, classId) {
+    function hasCentralReceiptsPermission(eventId) {
       let deterministicPath = /databases/$(database)/documents/coordinatorAssignments/$(request.auth.uid + '_' + eventId);
-      let customPath = ('assignmentId' in request.resource.data) ? 
+      let customPath = (request.resource != null && 'data' in request.resource && 'assignmentId' in request.resource.data) ? 
         /databases/$(database)/documents/coordinatorAssignments/$(request.resource.data.assignmentId) : 
         deterministicPath;
       let hasDeterministic = exists(deterministicPath);
@@ -59,12 +59,7 @@ service cloud.firestore {
         ('crossClassCollection' in assignmentDoc.data) &&
         assignmentDoc.data.crossClassCollection.enabled == true &&
         ('capabilities' in assignmentDoc.data.crossClassCollection) &&
-        assignmentDoc.data.crossClassCollection.capabilities.canAccessCentralReceipts == true &&
-        (
-          !('authorizedClassIds' in assignmentDoc.data.crossClassCollection) ||
-          assignmentDoc.data.crossClassCollection.authorizedClassIds.size() == 0 ||
-          classId in assignmentDoc.data.crossClassCollection.authorizedClassIds
-        );
+        assignmentDoc.data.crossClassCollection.capabilities.canAccessCentralReceipts == true;
     }
 
     // 1. Users collection: Any authenticated user can read their own profile; Super/Class/View coordinators can read user list
@@ -127,13 +122,16 @@ service cloud.firestore {
 
     // 7. Central Receipts (Super Coordinator OR Cross-Class Assistant with verified server-side permission)
     match /centralReceipts/{receiptId} {
-      allow read: if isActiveUser();
+      allow read: if isSuperCoordinator() || (
+        isActiveUser() &&
+        hasCentralReceiptsPermission(resource.data.eventId)
+      );
       allow create: if isSuperCoordinator() || (
         isActiveUser() &&
         isEventActive(request.resource.data.eventId) &&
         isClassActive(request.resource.data.classId) &&
         request.resource.data.receivedBy == request.auth.uid &&
-        hasCentralReceiptsPermission(request.resource.data.eventId, request.resource.data.classId)
+        hasCentralReceiptsPermission(request.resource.data.eventId)
       );
       allow update, delete: if isSuperCoordinator();
     }

@@ -199,3 +199,104 @@ export async function verifySuperCoordinatorCaller(
     name: userData.name || "Super Coordinator",
   };
 }
+
+export interface CentralReceiptCallerInfo {
+  uid: string;
+  email?: string;
+  name: string;
+  role: string;
+  roleTitle: string;
+}
+
+export async function verifyCentralReceiptAccessCaller(
+  req: VercelRequest,
+  eventId: string
+): Promise<CentralReceiptCallerInfo> {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    const err = new Error("Unauthenticated: Missing or malformed Authorization Bearer header.");
+    (err as any).statusCode = 401;
+    throw err;
+  }
+
+  const idToken = authHeader.split(" ")[1]?.trim();
+  if (!idToken) {
+    const err = new Error("Unauthenticated: Empty Bearer token provided.");
+    (err as any).statusCode = 401;
+    throw err;
+  }
+
+  const auth = getAdminAuth();
+  const firestore = getAdminFirestore();
+
+  let decodedToken: DecodedIdToken;
+  try {
+    decodedToken = await auth.verifyIdToken(idToken);
+  } catch (verifyError: any) {
+    const err = new Error(
+      `Unauthenticated: Invalid or expired ID token (${verifyError.message || "token verification failed"}).`
+    );
+    (err as any).statusCode = 401;
+    throw err;
+  }
+
+  const callerUid = decodedToken.uid;
+  const userDoc = await firestore.collection("users").doc(callerUid).get();
+
+  if (!userDoc.exists) {
+    const err = new Error("Access Denied: Caller account does not exist in the system database.");
+    (err as any).statusCode = 403;
+    throw err;
+  }
+
+  const userData = userDoc.data();
+  if (!userData || userData.active === false || userData.loginEnabled === false) {
+    const err = new Error("Access Denied: Account is deactivated or disabled.");
+    (err as any).statusCode = 403;
+    throw err;
+  }
+
+  // 1. Super Coordinator has unrestricted access
+  if (userData.role === "super_coordinator") {
+    return {
+      uid: callerUid,
+      email: decodedToken.email || userData.email,
+      name: userData.name || "Super Coordinator",
+      role: "super_coordinator",
+      roleTitle: "Super Coordinator",
+    };
+  }
+
+  // 2. Cross-Class Assistant must have canAccessCentralReceipts enabled for this event
+  const assignmentsSnap = await firestore
+    .collection("coordinatorAssignments")
+    .where("userId", "==", callerUid)
+    .where("eventId", "==", eventId)
+    .where("active", "==", true)
+    .get();
+
+  let hasCentralAccess = false;
+  assignmentsSnap.forEach((doc) => {
+    const data = doc.data();
+    if (
+      data.crossClassCollection?.enabled === true &&
+      data.crossClassCollection?.capabilities?.canAccessCentralReceipts === true
+    ) {
+      hasCentralAccess = true;
+    }
+  });
+
+  if (!hasCentralAccess) {
+    const err = new Error("Access Denied: You do not have permission to access Central Receipts.");
+    (err as any).statusCode = 403;
+    throw err;
+  }
+
+  return {
+    uid: callerUid,
+    email: decodedToken.email || userData.email,
+    name: userData.name || "Cross-Class Collection Assistant",
+    role: userData.role,
+    roleTitle: "Cross-Class Collection Assistant",
+  };
+}

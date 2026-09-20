@@ -51,7 +51,13 @@ export const LoginPage: React.FC = () => {
     try {
       await login(email, password);
     } catch (err: any) {
-      setErrorMessage(err.message || "Failed to log in.");
+      console.error("Login attempt failed:", err);
+      const rawMsg = String(err?.message || "");
+      if (rawMsg.includes("deactivated") || rawMsg.includes("disabled")) {
+        setErrorMessage("Your account has been deactivated. Please contact the Super Coordinator.");
+      } else {
+        setErrorMessage("Invalid email or password.");
+      }
     } finally {
       setLoading(false);
     }

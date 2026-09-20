@@ -165,9 +165,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (err: any) {
       console.error("Login failed:", err);
-      let msg = "Invalid email or password. Please try again.";
-      if (err.message) {
-        msg = err.message;
+      let msg = "Invalid email or password.";
+      const rawMsg = String(err?.message || "");
+      const errCode = String(err?.code || "");
+
+      // Preserve explicit account state messages
+      if (rawMsg.includes("deactivated") || rawMsg.includes("disabled")) {
+        msg = "Your account has been deactivated. Please contact the Super Coordinator.";
+      } else if (
+        errCode === "auth/invalid-credential" ||
+        errCode === "auth/user-not-found" ||
+        errCode === "auth/wrong-password" ||
+        errCode === "auth/invalid-email" ||
+        rawMsg.includes("auth/") ||
+        rawMsg.includes("Firebase:") ||
+        rawMsg.includes("credential") ||
+        rawMsg.includes("User record not found")
+      ) {
+        msg = "Invalid email or password.";
+      } else if (rawMsg && !rawMsg.includes("Firebase") && !rawMsg.includes("auth/")) {
+        msg = rawMsg;
       }
       setError(msg);
       throw new Error(msg, { cause: err });

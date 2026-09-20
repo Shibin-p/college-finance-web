@@ -73,6 +73,13 @@ export const AppRoutes: React.FC = () => {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<RootRedirect />} />
 
+      {/* Central Receipts Route (Super Coordinator OR Authorized Cross-Class Assistant) */}
+      <Route element={<ProtectedRoute requireCentralReceiptsAccess={true} />}>
+        <Route element={<AppLayout />}>
+          <Route path="/super/receipts" element={<CentralReceiptsPage />} />
+        </Route>
+      </Route>
+
       {/* Super Coordinator Routes */}
       <Route element={<ProtectedRoute allowedRoles={["super_coordinator"]} />}>
         <Route element={<AppLayout />}>
@@ -82,7 +89,6 @@ export const AppRoutes: React.FC = () => {
           <Route path="/super/students" element={<StudentManagement />} />
           <Route path="/super/collection" element={<CollectionManagement />} />
           <Route path="/super/approvals" element={<ApprovalsManagement />} />
-          <Route path="/super/receipts" element={<CentralReceiptsPage />} />
           <Route path="/super/reconciliation" element={<ReconciliationPage />} />
           <Route path="/super/expenses" element={<ExpensesPage />} />
           <Route path="/super/closing" element={<DailyClosingPage />} />

@@ -7,6 +7,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "../firebase/firestore";
+import { auth } from "../firebase/auth";
 import { COLLECTIONS } from "../firebase/collections";
 import type { CentralReceiptModel, UserProfile } from "../types";
 import { logAudit } from "./auditService";
@@ -36,6 +37,43 @@ export async function createCentralReceipt(
     );
   }
 
+  // 1. Attempt secure Vercel API with Firebase ID token
+  try {
+    const token = await auth.currentUser?.getIdToken();
+    if (token) {
+      const response = await fetch("/api/create-central-receipt", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(params),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.receipt) {
+          return result.receipt as CentralReceiptModel;
+        }
+      } else if (response.status === 403 || response.status === 401 || response.status === 400) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || `Server authorization error (${response.status})`);
+      }
+    }
+  } catch (apiErr: any) {
+    // If it was an explicit authorization or validation error, rethrow immediately
+    if (
+      apiErr.message?.includes("Access Denied") ||
+      apiErr.message?.includes("Discrepancy") ||
+      apiErr.message?.includes("Total amount") ||
+      apiErr.message?.includes("authorization error")
+    ) {
+      throw apiErr;
+    }
+    console.warn("[receiptService] create-central-receipt API fallback:", apiErr.message);
+  }
+
+  // 2. Direct Firestore fallback (enforced by firestore.rules)
   const roleTitle =
     actorRoleTitle ||
     (user.role === "super_coordinator"
@@ -93,10 +131,44 @@ export async function fetchCentralReceipts(
   eventId: string,
   classId?: string
 ): Promise<CentralReceiptModel[]> {
+  // 1. Attempt secure Vercel API with ID token
+  try {
+    const token = await auth.currentUser?.getIdToken();
+    if (token) {
+      const url = new URL("/api/get-central-receipts", window.location.origin);
+      url.searchParams.set("eventId", eventId);
+      if (classId && classId !== "all") {
+        url.searchParams.set("classId", classId);
+      }
+
+      const response = await fetch(url.toString(), {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && Array.isArray(result.receipts)) {
+          return result.receipts as CentralReceiptModel[];
+        }
+      } else if (response.status === 403 || response.status === 401) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || "Access Denied: You do not have permission to view Central Receipts.");
+      }
+    }
+  } catch (apiErr: any) {
+    if (apiErr.message?.includes("Access Denied")) {
+      throw apiErr;
+    }
+    console.warn("[receiptService] get-central-receipts API fallback:", apiErr.message);
+  }
+
+  // 2. Direct Firestore fallback
   try {
     const ref = collection(db, COLLECTIONS.CENTRAL_RECEIPTS);
     let q = query(ref, where("eventId", "==", eventId));
-    if (classId) {
+    if (classId && classId !== "all") {
       q = query(ref, where("eventId", "==", eventId), where("classId", "==", classId));
     }
     const snap = await getDocs(q);
@@ -105,8 +177,8 @@ export async function fetchCentralReceipts(
       list.push({ id: d.id, ...(d.data() as Omit<CentralReceiptModel, "id">) });
     });
     return list.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  } catch (error) {
+  } catch (error: any) {
     console.error(`Error fetching central receipts for event ${eventId}:`, error);
-    return [];
+    throw error;
   }
 }

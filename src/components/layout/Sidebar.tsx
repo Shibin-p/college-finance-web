@@ -25,7 +25,7 @@ import {
 
 export const Sidebar: React.FC = () => {
   const { userProfile } = useAuth();
-  const { isCrossClassAssistant, viewerPermissions } = usePermissions();
+  const { isCrossClassAssistant, viewerPermissions, crossClassCapabilities } = usePermissions();
   if (!userProfile) return null;
 
   const superLinks = [
@@ -67,6 +67,10 @@ export const Sidebar: React.FC = () => {
   const assistantLinks = [
     { to: "/collection-assistant/dashboard", icon: Layers, label: "Assistant Workspace" },
   ];
+
+  if (crossClassCapabilities?.canAccessCentralReceipts) {
+    assistantLinks.push({ to: "/super/receipts", icon: Receipt, label: "Central Receipts" });
+  }
 
   return (
     <aside className="hidden lg:flex flex-col w-64 border-r border-slate-800 bg-slate-950/60 p-4 shrink-0 overflow-y-auto justify-between">

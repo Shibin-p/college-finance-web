@@ -7,14 +7,16 @@ import type { UserRole } from "../types";
 interface ProtectedRouteProps {
   allowedRoles?: UserRole[];
   requireCrossClassAssistant?: boolean;
+  requireCentralReceiptsAccess?: boolean;
 }
 
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   allowedRoles,
   requireCrossClassAssistant,
+  requireCentralReceiptsAccess,
 }) => {
   const { userProfile, loading: authLoading, currentUser } = useAuth();
-  const { isCrossClassAssistant, loading: permsLoading } = usePermissions();
+  const { isCrossClassAssistant, crossClassCapabilities, loading: permsLoading } = usePermissions();
 
   if (authLoading || permsLoading) {
     return (
@@ -31,6 +33,18 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
   if (!userProfile.active || !userProfile.loginEnabled) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Central Receipts Access route guard (Super Coordinator OR Cross-Class Assistant with explicit permission)
+  if (requireCentralReceiptsAccess) {
+    const canAccessCentral =
+      userProfile.role === "super_coordinator" ||
+      (isCrossClassAssistant && Boolean(crossClassCapabilities?.canAccessCentralReceipts));
+
+    if (canAccessCentral) {
+      return <Outlet />;
+    }
+    return <Navigate to="/" replace />;
   }
 
   // Cross-Class Assistant capability route guard

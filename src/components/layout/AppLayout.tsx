@@ -29,7 +29,7 @@ import {
 
 export const AppLayout: React.FC = () => {
   const { userProfile } = useAuth();
-  const { permissions, viewerPermissions, isCrossClassAssistant } = usePermissions();
+  const { permissions, viewerPermissions, isCrossClassAssistant, crossClassCapabilities } = usePermissions();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const superLinks = [
@@ -64,6 +64,9 @@ export const AppLayout: React.FC = () => {
   coordinatorLinks.push({ to: "/coordinator/submissions", icon: CheckSquare, label: "My Submissions" });
   if (isCrossClassAssistant) {
     coordinatorLinks.push({ to: "/collection-assistant/dashboard", icon: Layers, label: "Assistant Workspace" });
+    if (crossClassCapabilities?.canAccessCentralReceipts) {
+      coordinatorLinks.push({ to: "/super/receipts", icon: Receipt, label: "Central Receipts" });
+    }
   }
 
   // Dynamic modules for View Coordinator
@@ -77,6 +80,9 @@ export const AppLayout: React.FC = () => {
   }
   if (isCrossClassAssistant) {
     viewerLinks.push({ to: "/collection-assistant/dashboard", icon: Layers, label: "Assistant Workspace" });
+    if (crossClassCapabilities?.canAccessCentralReceipts) {
+      viewerLinks.push({ to: "/super/receipts", icon: Receipt, label: "Central Receipts" });
+    }
   }
 
   const activeModules =

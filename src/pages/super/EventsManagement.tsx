@@ -17,6 +17,7 @@ import {
   Copy,
   Settings,
   Lock,
+  Unlock,
   Archive,
 } from "lucide-react";
 
@@ -250,13 +251,24 @@ export const EventsManagement: React.FC = () => {
                   )}
 
                   {ev.status === "closed" && (
-                    <button
-                      onClick={() => setStatusDialogEvent({ event: ev, nextStatus: "archived" })}
-                      title="Archive Event"
-                      className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-                    >
-                      <Archive className="w-4 h-4" />
-                    </button>
+                    <>
+                      <button
+                        onClick={() => setStatusDialogEvent({ event: ev, nextStatus: "active" })}
+                        title="Reopen Event"
+                        className="px-2.5 py-1.5 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/40 border border-emerald-500/30 rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Unlock className="w-4 h-4" />
+                        <span className="text-xs font-bold">Reopen Event</span>
+                      </button>
+
+                      <button
+                        onClick={() => setStatusDialogEvent({ event: ev, nextStatus: "archived" })}
+                        title="Archive Event"
+                        className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                      >
+                        <Archive className="w-4 h-4" />
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -519,9 +531,19 @@ export const EventsManagement: React.FC = () => {
           isOpen={!!statusDialogEvent}
           onClose={() => setStatusDialogEvent(null)}
           onConfirm={handleStatusChange}
-          title={`Change Status to "${statusDialogEvent.nextStatus.toUpperCase()}"`}
-          message={`Are you sure you want to change the status of "${statusDialogEvent.event.name}" to ${statusDialogEvent.nextStatus}? When closed or archived, payment collections will be restricted according to coordinator permissions.`}
-          confirmLabel="Update Status"
+          title={
+            statusDialogEvent.nextStatus === "active"
+              ? "Reopen this event?"
+              : `Change Status to "${statusDialogEvent.nextStatus.toUpperCase()}"`
+          }
+          message={
+            statusDialogEvent.nextStatus === "active"
+              ? "Reopening the event will allow coordinators to resume permitted financial operations. Existing records will not be deleted or reset."
+              : `Are you sure you want to change the status of "${statusDialogEvent.event.name}" to ${statusDialogEvent.nextStatus}? When closed or archived, payment collections will be restricted according to coordinator permissions.`
+          }
+          confirmLabel={
+            statusDialogEvent.nextStatus === "active" ? "Reopen Event" : "Update Status"
+          }
           variant={statusDialogEvent.nextStatus === "archived" ? "danger" : "warning"}
         />
       )}

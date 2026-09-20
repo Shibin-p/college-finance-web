@@ -53,6 +53,10 @@ export async function createEvent(
   },
   user: UserProfile
 ): Promise<EventModel> {
+  if (user.role !== "super_coordinator" || user.active === false || user.loginEnabled === false) {
+    throw new Error("Unauthorized: Only an active Super Coordinator can create events.");
+  }
+
   const eventsRef = collection(db, COLLECTIONS.EVENTS);
   const now = serverTimestamp();
 
@@ -101,6 +105,15 @@ export async function updateEvent(
   updates: Partial<EventModel>,
   user: UserProfile
 ): Promise<void> {
+  if (user.role !== "super_coordinator" || user.active === false || user.loginEnabled === false) {
+    throw new Error("Unauthorized: Only an active Super Coordinator can update events.");
+  }
+
+  // If status is being updated, delegate to setEventStatus to ensure correct timestamps and audit logs
+  if (updates.status) {
+    return setEventStatus(id, updates.status, user);
+  }
+
   const ref = doc(db, COLLECTIONS.EVENTS, id);
   await updateDoc(ref, {
     ...updates,
@@ -119,11 +132,27 @@ export async function updateEvent(
   });
 }
 
+export async function reopenEvent(
+  id: string,
+  user: UserProfile
+): Promise<void> {
+  // Service layer authorization: exclusively active Super Coordinators
+  if (user.role !== "super_coordinator" || user.active === false || user.loginEnabled === false) {
+    throw new Error("Unauthorized: Only an active Super Coordinator can reopen an event.");
+  }
+  return setEventStatus(id, "active", user);
+}
+
 export async function setEventStatus(
   id: string,
   status: EventStatus,
   user: UserProfile
 ): Promise<void> {
+  // Service layer authorization: exclusively active Super Coordinators
+  if (user.role !== "super_coordinator" || user.active === false || user.loginEnabled === false) {
+    throw new Error("Unauthorized: Only an active Super Coordinator can change or reopen event status.");
+  }
+
   const ref = doc(db, COLLECTIONS.EVENTS, id);
   const updates: Record<string, any> = {
     status,
@@ -135,18 +164,35 @@ export async function setEventStatus(
     updates.closedAt = serverTimestamp();
   } else if (status === "archived") {
     updates.archivedAt = serverTimestamp();
+  } else if (status === "active") {
+    updates.reopenedAt = serverTimestamp();
+    updates.reopenedBy = user.uid;
   }
 
   await updateDoc(ref, updates);
+
+  const auditAction =
+    status === "active"
+      ? "EVENT_REOPENED"
+      : status === "closed"
+      ? "EVENT_CLOSED"
+      : `set_status_${status}`;
+
+  const auditDescription =
+    status === "active"
+      ? `Reopened event by Super Coordinator ${user.name}`
+      : status === "closed"
+      ? `Closed event by Super Coordinator ${user.name}`
+      : `Changed event status to ${status}`;
 
   await logAudit({
     userId: user.uid,
     userRole: user.role,
     userName: user.name,
-    action: `set_status_${status}`,
+    action: auditAction,
     category: "event_management",
     eventId: id,
-    description: `Changed event status to ${status}`,
+    description: auditDescription,
   });
 }
 
@@ -155,6 +201,10 @@ export async function duplicateEvent(
   newName: string,
   user: UserProfile
 ): Promise<EventModel> {
+  if (user.role !== "super_coordinator" || user.active === false || user.loginEnabled === false) {
+    throw new Error("Unauthorized: Only an active Super Coordinator can duplicate events.");
+  }
+
   const source = await fetchEventById(sourceEventId);
   if (!source) throw new Error("Source event not found");
 
