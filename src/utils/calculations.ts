@@ -246,13 +246,16 @@ export function calculateAggregateTotals(
 
   const adjustedTotalAmount = totalApprovedReceived + totalAmountAdjustments;
   const adjustedTotalCount = fullyPaidCount + totalCountAdjustments;
-  const balanceRemaining = totalApprovedReceived - totalExpenses;
+  const balanceRemaining = adjustedTotalAmount - totalExpenses;
 
   const collectionPercentage =
     totalRequired > 0
       ? Math.min(
           100,
-          Math.round((totalApprovedReceived / totalRequired) * 100 * 10) / 10
+          Math.max(
+            0,
+            Math.round((adjustedTotalAmount / totalRequired) * 100 * 10) / 10
+          )
         )
       : 0;
 

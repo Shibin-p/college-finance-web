@@ -205,8 +205,8 @@ export const SuperDashboard: React.FC = () => {
         />
 
         <StatCard
-          title="Total Received (Approved)"
-          value={formatINR(totals.totalApprovedReceived)}
+          title="Total Approved Amount"
+          value={formatINR(totals.adjustedTotalAmount)}
           subtitle={`${totals.collectionPercentage}% collected`}
           icon={TrendingUp}
           variant="emerald"
